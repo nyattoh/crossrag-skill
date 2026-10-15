@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.specstory/
+.cursorindexingignore
+*.egg-info/
+.pytest_cache/
