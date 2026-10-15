@@ -4,6 +4,16 @@
 
 検索はローカルの Python が数値で行います。文章を書くのは、結果を受け取った側のモデルです。楔積そのものが文章を生成するわけではなく、創造性が向上したという証明にもなりません。
 
+## アーキテクチャ
+
+![CrossRAG architecture: ordered context concepts and a corpus share one encoder; similarity, projection-residual, oriented-wedge, and reproducible random ranking return JSON motifs to a separate host LLM.](docs/images/architecture.svg)
+
+同じ文脈・コーパス・エンコーダに対して、類似、直交残差、向き付き楔積、再現可能なランダム順位の4手法を比較する構成です。図の平面と矢印は幾何学的な関係の模式図であり、高次元の楔積を一意な3次元の法線として扱うものではありません。直交残差は文脈全体が張る空間から計算し、楔積の向きは先頭2概念から計算します。先頭2概念を入れ替えると楔積成分の符号は反転しますが、重みを混ぜた最終順位全体が逆転するとは限りません。
+
+既定はオフラインの文字 n-gram ハッシュ特徴で、意味埋め込みではありません。意味埋め込みは SentenceTransformer / E5 を使う任意の選択肢です。検索の出力は既存コーパスのモチーフと数値スコアを含む JSON で、創作文章や未検証の仮説を書くのは別のホストモデルです。順位は実験的なヒューリスティックであり、創造性や発見の向上を証明せず、モチーフも事実の証拠にはなりません。
+
+図は実装 `93396d8f` に基づきます。[計算式と限界](skill/crossrag/references/methodology.md)も参照してください。
+
 ## 入っているもの
 
 インストール単位は [`skill/crossrag`](skill/crossrag) です。このディレクトリを、そのままエージェントのスキル置き場へコピーします。

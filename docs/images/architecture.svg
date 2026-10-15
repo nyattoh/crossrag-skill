@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1160" viewBox="0 0 1200 1160" role="img" aria-labelledby="title desc">
+<title id="title">CrossRAG: one corpus, four retrieval routes, a separate writer</title>
+<desc id="desc">Two or more ordered context concepts and a corpus of concept pairs with motif text share one encoder. The default is offline signed character n-gram hashing, not semantic embeddings; multilingual E5 via SentenceTransformer is optional. Four alternative ranking methods are similarity to the mean context vector, projection residual from the context span with blended weights, oriented bivector cosine with blended weights, and deterministic hash ranking as a control. Geometric drawings are schematic: oriented planes in higher dimensions do not define a unique three-dimensional normal. The selected method returns JSON motifs and scores. A separate host LLM writes creative prose or unverified hypotheses. These heuristic rankings do not establish improved creativity or discovery and retrieved motifs are not factual evidence.</desc>
+<defs>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#3058c9"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#147c78"/></marker>
+<marker id="gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#a66920"/></marker>
+</defs>
+<rect width="1200" height="1160" rx="24" fill="#f8f7f2"/>
+<g font-family="DejaVu Sans, Arial, sans-serif">
+<text x="40" y="42" font-size="14" fill="#3058c9" font-weight="700" text-anchor="start">CROSSRAG / EXPERIMENTAL RETRIEVAL</text>
+<text x="40" y="87" font-size="34" fill="#172a3a" font-weight="700" text-anchor="start">One corpus. Four ways to find a motif.</text>
+<text x="40" y="120" font-size="18" fill="#506374" font-weight="400" text-anchor="start">Local numerical retrieval supplies material; the receiving model writes the text.</text>
+<rect x="40" y="151" width="390" height="145" rx="16" fill="#142e45" stroke="#142e45"/>
+<text x="62" y="179" font-size="13" fill="#92cfd9" font-weight="700" text-anchor="start">01 / INPUTS</text>
+<text x="62" y="211" font-size="22" fill="#ffffff" font-weight="700" text-anchor="start">Ordered context concepts</text>
+<text x="62" y="237" font-size="16" fill="#d5e4eb" font-weight="400" text-anchor="start">2+ anchors; first two orient the wedge</text>
+<text x="62" y="273" font-size="18" fill="#ffffff" font-weight="400" text-anchor="start">+ Corpus: concept pair + motif text</text>
+<path d="M443 224 H495" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="512" y="151" width="648" height="145" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
+<text x="534" y="179" font-size="13" fill="#3058c9" font-weight="700" text-anchor="start">02 / ONE SHARED ENCODER</text>
+<text x="534" y="210" font-size="22" fill="#172a3a" font-weight="700" text-anchor="start">Context · candidate text · concept pairs</text>
+<text x="534" y="240" font-size="17" fill="#506374" font-weight="400" text-anchor="start">Default: signed character n-gram hashing (offline)</text>
+<text x="534" y="270" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Optional: semantic embeddings via SentenceTransformer / E5</text>
+<path d="M835 296 V322 H600 V348" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
+<text x="40" y="335" font-size="13" fill="#3058c9" font-weight="700" text-anchor="start">03 / CHOOSE A RANKING METHOD</text>
+<text x="1160" y="335" font-size="15" fill="#506374" font-weight="400" text-anchor="end">Same encoder + corpus for comparisons</text>
+<rect x="40" y="364" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
+<rect x="612" y="364" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
+<rect x="40" y="604" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
+<rect x="612" y="604" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
+<text x="62" y="398" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">SIMILAR</text>
+<path d="M90 530 L226 470" fill="none" stroke="#3058c9" stroke-width="3" marker-end="url(#blue)"/>
+<path d="M90 530 L213 437" fill="none" stroke="#147c78" stroke-width="3" marker-end="url(#teal)"/>
+<path d="M137 509 Q137 493 128 501" fill="none" stroke="#a66920" stroke-width="2"/>
+<text x="206" y="492" font-size="13" fill="#3058c9" font-weight="400" text-anchor="start">mean</text>
+<text x="192" y="425" font-size="13" fill="#147c78" font-weight="400" text-anchor="start">candidate</text>
+<circle cx="90" cy="530" r="4" fill="#172a3a"/>
+<text x="278" y="443" font-size="21" fill="#172a3a" font-weight="700" text-anchor="start">Near the context</text>
+<text x="278" y="474" font-size="17" fill="#506374" font-weight="400" text-anchor="start">Cosine to the mean</text>
+<text x="278" y="499" font-size="17" fill="#506374" font-weight="400" text-anchor="start">context vector</text>
+<text x="278" y="548" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">Similarity baseline</text>
+<text x="634" y="398" font-size="15" fill="#147c78" font-weight="700" text-anchor="start">ORTHOGONAL</text>
+<polygon points="648,528 771,548 848,490 725,470" fill="#e2eeef" stroke="#96bcbc" stroke-width="1.5"/>
+<path d="M674 523 L777 502" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
+<path d="M674 523 L777 425" fill="none" stroke="#147c78" stroke-width="2.5" marker-end="url(#teal)"/>
+<path d="M777 502 L777 425" fill="none" stroke="#a66920" stroke-width="3" marker-end="url(#gold)"/>
+<path d="M777 490 L765 493 L765 505" fill="none" stroke="#a66920" stroke-width="1.5"/>
+<circle cx="777" cy="502" r="4" fill="#3058c9"/>
+<text x="785" y="456" font-size="12" fill="#a66920" font-weight="400" text-anchor="start">residual</text>
+<text x="679" y="567" font-size="12" fill="#506374" font-weight="400" text-anchor="start">context span (schematic)</text>
+<text x="880" y="443" font-size="20" fill="#172a3a" font-weight="700" text-anchor="start">Beyond the span</text>
+<text x="880" y="474" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Projection residual</text>
+<text x="880" y="499" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ cosine-band</text>
+<text x="880" y="524" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ coherence weights</text>
+<text x="62" y="638" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">WEDGE</text>
+<polygon points="78,754 165,775 224,731 137,710" fill="#e2e9fb" stroke="#3058c9" stroke-width="1.5"/>
+<path d="M78 754 L165 775" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
+<path d="M78 754 L137 710" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
+<path d="M124 744 C147 729 181 746 161 756" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
+<text x="83" y="797" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">a ∧ b</text>
+<polygon points="178,696 249,719 272,661 201,638" fill="#dcf0eb" stroke="#147c78" stroke-width="1.5"/>
+<path d="M178 696 L249 719" fill="none" stroke="#147c78" stroke-width="2" marker-end="url(#teal)"/>
+<path d="M178 696 L201 638" fill="none" stroke="#147c78" stroke-width="2" marker-end="url(#teal)"/>
+<path d="M206 689 C203 666 240 666 238 690" fill="none" stroke="#147c78" stroke-width="2" marker-end="url(#teal)"/>
+<text x="234" y="644" font-size="15" fill="#147c78" font-weight="700" text-anchor="start">u ∧ v</text>
+<text x="298" y="683" font-size="20" fill="#172a3a" font-weight="700" text-anchor="start">Compare orientation</text>
+<text x="298" y="714" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Oriented bivector cosine</text>
+<text x="298" y="739" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ cosine-band</text>
+<text x="298" y="764" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ coherence weights</text>
+<text x="298" y="798" font-size="13" fill="#3058c9" font-weight="400" text-anchor="start">Planes, not a unique 3D normal</text>
+<text x="634" y="638" font-size="15" fill="#a66920" font-weight="700" text-anchor="start">RANDOM</text>
+<circle cx="672" cy="691" r="7" fill="#d4dce3"/>
+<circle cx="726" cy="672" r="10" fill="#a66920"/>
+<circle cx="803" cy="701" r="7" fill="#d4dce3"/>
+<circle cx="692" cy="758" r="10" fill="#3058c9"/>
+<circle cx="769" cy="747" r="10" fill="#147c78"/>
+<circle cx="815" cy="789" r="7" fill="#d4dce3"/>
+<circle cx="649" cy="801" r="7" fill="#d4dce3"/>
+<text x="722" y="676" font-size="11" fill="#ffffff" font-weight="700" text-anchor="start">1</text>
+<text x="688" y="762" font-size="11" fill="#ffffff" font-weight="700" text-anchor="start">3</text>
+<text x="765" y="751" font-size="11" fill="#ffffff" font-weight="700" text-anchor="start">2</text>
+<text x="880" y="683" font-size="20" fill="#172a3a" font-weight="700" text-anchor="start">A control route</text>
+<text x="880" y="714" font-size="17" fill="#506374" font-weight="400" text-anchor="start">Deterministic hash</text>
+<text x="880" y="739" font-size="17" fill="#506374" font-weight="400" text-anchor="start">ranking</text>
+<text x="880" y="789" font-size="14" fill="#a66920" font-weight="700" text-anchor="start">Reproducible comparison</text>
+<path d="M600 834 V864 H298 V884" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
+<text x="618" y="855" font-size="15" fill="#506374" font-weight="400" text-anchor="start">Selected method → ranked results</text>
+<rect x="40" y="893" width="484" height="141" rx="16" fill="#eef2f6" stroke="#d5e0e5"/>
+<text x="62" y="920" font-size="13" fill="#3058c9" font-weight="700" text-anchor="start">04 / JSON OUTPUT</text>
+<text x="62" y="951" font-size="21" fill="#172a3a" font-weight="700" text-anchor="start">Retrieved motifs + numerical scores</text>
+<text x="62" y="980" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Concept pairs · source text · selected score</text>
+<text x="62" y="1009" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Cosine · orthogonal residual · wedge cosine</text>
+<path d="M541 964 H652" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
+<path d="M600 891 V1034" fill="none" stroke="#99a9b6" stroke-width="1.5" stroke-dasharray="5 6"/>
+<rect x="677" y="893" width="483" height="141" rx="16" fill="#142e45" stroke="#142e45"/>
+<text x="699" y="920" font-size="13" fill="#92cfd9" font-weight="700" text-anchor="start">05 / SEPARATE HOST LLM</text>
+<text x="699" y="952" font-size="23" fill="#ffffff" font-weight="700" text-anchor="start">Writes from retrieved material</text>
+<text x="699" y="982" font-size="17" fill="#d5e4eb" font-weight="400" text-anchor="start">Creative prose or unverified hypotheses</text>
+<text x="699" y="1011" font-size="16" fill="#d5e4eb" font-weight="400" text-anchor="start">Retrieval itself does not generate prose</text>
+<text x="40" y="1072" font-size="13" fill="#506374" font-weight="400" text-anchor="start">Geometry is schematic. Swapping the first two anchors flips the wedge component, not necessarily the blended ranking.</text>
+<text x="40" y="1098" font-size="15" fill="#172a3a" font-weight="700" text-anchor="start">Heuristic ranks ≠ proven creativity or discovery benefits. Motifs are inspiration, not verified factual evidence.</text>
+<text x="40" y="1130" font-size="13" fill="#506374" font-weight="400" text-anchor="start">Reference prototype · main 93396d8f · HashEncoder is not a semantic embedding model</text>
+</g></svg>
