@@ -93,3 +93,9 @@ python scripts/run.py --context "犬、カレー" --corpus references/example-co
 ## 出典
 
 検索本体は CrossRAG Lab v0.1 を基にした研究プロトタイプです。背景として [Geometric Deep Learning](https://arxiv.org/abs/1603.09320) と [Sentence-Transformers の類似度](https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html) を参照しています。
+
+## ライセンス
+
+MIT License で公開しています。詳細は [LICENSE](LICENSE) を参照してください。
+
+NumPy、Sentence-Transformers、利用する埋め込みモデルなどの外部依存物には、それぞれのライセンスが適用されます。
