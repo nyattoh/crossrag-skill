@@ -389,6 +389,80 @@ class LeakageAndCliTest(unittest.TestCase):
 
 
 class RatioGeometryTest(unittest.TestCase):
+    def test_token_geometry_known_vectors_have_joint_support_and_mean_grouping(self):
+        from third_concept import token_geometry
+
+        result = token_geometry(
+            np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]),
+            np.array([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0],
+                      [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+            mu=np.zeros(3),
+        )
+        expected_joint = (((1 + 1 / np.sqrt(2)) / 2) ** 2) ** 0.25
+        expected_single = (1 / 4) ** 0.25
+        self.assertAlmostEqual(result[0]["score"], expected_joint)
+        self.assertAlmostEqual(result[1]["score"], expected_single)
+        self.assertAlmostEqual(result[2]["score"], expected_single)
+        self.assertEqual(result[3]["score"], 0.0)
+        self.assertGreater(result[0]["score"], result[1]["score"])
+        self.assertGreater(result[1]["score"], result[3]["score"])
+        self.assertAlmostEqual(result[0]["a_side_support"], 1 / np.sqrt(2))
+        self.assertAlmostEqual(result[0]["b_side_support"], 1 / np.sqrt(2))
+        self.assertEqual(result[0]["between_direction_support"], 1.0)
+        self.assertEqual(result[0]["plane_support"], 1.0)
+        self.assertEqual(result[0]["aggregation"], "mean-vector-geometric-v2")
+        pooled = token_geometry(
+            np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]),
+            [np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])],
+            mu=np.zeros(3),
+        )
+        self.assertAlmostEqual(pooled[0]["score"], expected_joint)
+
+    def test_token_geometry_is_scale_and_anchor_order_invariant_and_defines_zero(self):
+        from third_concept import token_geometry
+
+        a, b = np.array([1., 0., 0.]), np.array([0., 1., 0.])
+        groups = np.array([[1., 1., 0.], [1., 0., 0.], [0., 1., 0.],
+                           [0., 0., 1.], [0., 0., 0.]])
+        baseline = token_geometry(a, b, groups, mu=np.zeros(3))
+        scaled = token_geometry(7 * a, 0.25 * b, groups * np.array([3., 0.2, 8., 2., 4.])[:, None], mu=np.zeros(3))
+        swapped = token_geometry(b, a, groups, mu=np.zeros(3))
+        keys = ("score", "a_side_support", "b_side_support", "between_direction_support", "plane_support")
+        for i in range(len(groups)):
+            for key in keys:
+                self.assertAlmostEqual(baseline[i][key], scaled[i][key])
+                if key in ("score", "between_direction_support", "plane_support"):
+                    self.assertAlmostEqual(baseline[i][key], swapped[i][key])
+        self.assertEqual(baseline[-1]["score"], 0.0)
+        self.assertTrue(all(baseline[-1][key] == 0.0 for key in keys))
+        collinear = token_geometry(a, 2 * a, groups[:2], mu=np.zeros(3))
+        self.assertEqual([row["score"] for row in collinear], [0.0, 0.0])
+
+    def test_token_wedge_rejects_unknown_method_and_model_prefix_policy_is_fixed(self):
+        from third_concept import make_encoder
+
+        unknown = make_encoder("semantic", "unknown/model", model=RecordingModel(), prefix_policy="auto")
+        self.assertIsNone(unknown.prefix)
+        encoder = make_encoder("semantic", "intfloat/multilingual-e5-small", model=RecordingModel(), prefix_policy="prefix-free")
+        encoder.encode_query(["A"])
+        self.assertEqual(encoder.model.calls[0], ["A"])
+
+    def test_passage_token_embeddings_keep_full_contextual_text(self):
+        class TokenModel:
+            def __init__(self):
+                self.calls = []
+
+            def encode(self, texts, **kwargs):
+                self.calls.append((list(texts), kwargs))
+                return [np.asarray([[1., 0., 0.], [0., 1., 0.]]) for _ in texts]
+
+        model = TokenModel()
+        encoder = make_encoder("semantic", "unknown/model", model=model)
+        vectors = encoder.encode_passage_tokens(["雨音を聞きながら眠る"])
+        self.assertEqual(model.calls[0][0], ["雨音を聞きながら眠る"])
+        self.assertEqual(model.calls[0][1]["output_value"], "token_embeddings")
+        self.assertEqual(vectors[0].shape, (2, 3))
+
     @staticmethod
     def anchors(rho, dimension=4):
         a = np.zeros(dimension)

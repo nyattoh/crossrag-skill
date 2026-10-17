@@ -260,6 +260,41 @@ $env:HF_HUB_OFFLINE='1'; python scripts/compare_third_concept.py --A '<A>' --B '
 
 結果が既存手法を上回らなくても、そのまま記入する。
 
+### 9.5f 較正評価と token joint 方式（合成のみ、2026-10-18）
+
+【テスト条件】個人データ・実モデルは使わず、三次元の既知ベクトルを返す fake encoder と合成コーパス 6 件を使った。target は A=`steam`, B=`sleep`、対照は `desk×pencil`, `snow×bird`, `copper×orbit`。これらの対照語はテスト上 target と同じ A/B ベクトルを返すため、target と controls の差が出ないよう意図した条件である。三次元既知ベクトルの候補表では `mu=0` とし、A/B を直交単位方向に固定した。
+
+| 合成候補 | 内容の役割 | third-concept-ratio `emergence_ratio` | `third-concept-token-joint-v2` score | token joint-supported |
+|---|---|---:|---:|---|
+| A+B explicit | A・B の明示的組合せ | 0.5000 | 0.9239 | はい |
+| A only | A 側の方向のみ | 0.0000 | 0.7071 | いいえ |
+| B only | B 側の方向のみ | 0.0000 | 0.7071 | いいえ |
+| unrelated | AB 平面に直交 | 0.0000 | 0.0000 | いいえ |
+| English/config | 異質な英語・設定断片（直交ベクトルを割当） | 0.0000 | 0.0000 | いいえ |
+| word-absent joint | A・B の語を含まない組合せ（A+B と同一ベクトルを割当） | 0.5000 | 0.9239 | はい |
+
+【ペア入替較正結果】同じ 6 件の候補と同じ fake encoder で target と 3 controls を評価した。target の legacy `between_AB` 有効率は 4/6 = 0.6667、token joint-supported は 2/6 = 0.3333。各 control にも同じ値が出た。両方式の中央順位 percentile は 50.0、descending competition rank は 1、target/control top-k Jaccard は 1.0（limit=3）。これは同一投影の controls に対して実装された較正計算が tie を報告することを確認しただけで、有意性や実データでの性能を示さない。コーパス候補は陽性文・A のみ・B のみ・無関係・英語設定断片・語を含まない組合せ文の6役を含む。
+
+| 方式 | target 値 | 3 controls | target percentile / rank | target-control top-k Jaccard |
+|---|---:|---:|---:|---:|
+| `third-concept-ratio`（legacy valid rate） | 0.6667 (4/6) | 各 0.6667 | 50.0 / 1 | 1.0 |
+| `third-concept-token-joint-v2`（joint-supported rate） | 0.3333 (2/6) | 各 0.3333 | 50.0 / 1 | 1.0 |
+
+【解釈と限界】既知ベクトル上では token score は A-only / B-only より A+B 二等分方向を上位にし、直交ノイズを 0 とした。一方、語を含まない組合せ文に A+B と同じベクトルを与えれば両方式は区別できない。ベクトル空間に意味ラベルがない以上、この非検出境界は想定どおりである。test の fake mapping は幾何計算を確かめるもので、言語モデルの意味理解、英語設定断片の一般的な低評価、モデル間の比較を証明しない。token 方式の実モデル挙動は親が実行予定。
+
+| 実データ評価（親が実行予定） | ペア入替 percentile / rank | legacy valid rate | token joint-supported rate | 上位候補のブラインド評価 |
+|---|---:|---:|---:|---|
+|  |  |  |  |  |
+
+【TDD 証拠】Round 2 と最終 token 修正は、意味のある assertion failure を確認してから実装した。初回 Round 1 では、最初の対象テスト呼出しが Python の `tests` package import に失敗したため、そこは red 証拠として数えない。修正後は3件の test method を実行し、`test_token_wedge_rejects_unknown_method_and_model_prefix_policy_is_fixed` が `ValueError: prefix_policy must be 'auto', 'e5', or 'prefix-free'` で失敗（exit 1）、その後4件成功（exit 0）。
+
+| 実装反復 | red（対象テスト、修正前） | green / 全回帰 |
+|---|---|---|
+| Round 2 | `python -m unittest test_third_concept.RatioGeometryTest.test_token_wedge_known_vectors_and_aggregation test_compare_third_concept.ComparisonV3Test.test_calibration_uses_full_eligible_corpus_and_same_exclusions_and_input_kind test_compare_third_concept.ComparisonV3Test.test_markdown_renders_calibration_and_non_significance_limitations` → `FAIL: ...test_token_wedge_known_vectors_and_aggregation`; `AssertionError: 1.0 != 0.0`、他に `TypeError: calibrate_control_pairs() got an unexpected keyword argument 'exclude'` を確認、exit 1 | 最終対象6 tests `Ran 6 tests ... OK`, exit 0。全回帰 88件 OK, exit 0。 |
+| 最終 token 修正 | `python -m unittest test_third_concept.RatioGeometryTest.test_token_geometry_known_synthetic_roles_and_legacy_difference test_third_concept.RatioGeometryTest.test_token_geometry_is_scale_and_anchor_order_invariant_and_defines_zero test_compare_third_concept.ComparisonV3Test.test_calibration_token_score_aggregates_joint_synthetic_roles` → `FAIL: ...test_token_geometry_known_synthetic_roles_and_legacy_difference`; expected `0.70710678`, got `0.81649658`, exit 1 | 対象5 tests `Ran 5 tests ... OK`, exit 0。全回帰 89件 OK, exit 0。 |
+
+さらに最終統合後、`cd skill/crossrag && python -m unittest discover -s tests` を再実行し `Ran 89 tests ... OK`、終了コード 0 を確認した。実装反復ごとの出力詳細と provider/model/effort は作業 handover に記録する。
+
 ### 9.6 実行コマンド例
 
 ```bash
@@ -270,8 +305,14 @@ python scripts/compare_third_concept.py --A <語A> --B <語B> --corpus <corpus.j
 python scripts/compare_third_concept.py --A "<文A>" --B "<文B>" --input-kind sentence --exclude <中心語A> --exclude <中心語B> --corpus <corpus.json> --encoder semantic --aggregate-only
 # 単語と文の同条件比較
 python scripts/compare_third_concept.py --A <語A> --B <語B> --A-sentence "<文A>" --B-sentence "<文B>" --exclude <中心語A> --corpus <corpus.json> --encoder semantic --null-samples 1000 --aggregate-only
+# 対照ペアを明示して較正（任意の数だけ繰り返す）
+python scripts/compare_third_concept.py --A <語A> --B <語B> --corpus <corpus.json> --encoder semantic --model intfloat/multilingual-e5-small --prefix-policy auto --control-pair "机|鉛筆" --control-pair "雪|鳥" --seed 0 --aggregate-only
+# 語リストファイル（JSON文字列配列）から seed 固定で対照ペアを抽出
+python scripts/compare_third_concept.py --A <語A> --B <語B> --corpus <corpus.json> --encoder semantic --model <model-id> --prefix-policy auto --control-words <control-words.json> --control-samples 20 --seed 0 --aggregate-only
 # 候補の抽出（新方式）
 python scripts/third_concept_cli.py --A "<文A>" --B "<文B>" --corpus <corpus.json> --encoder semantic --method third-concept-ratio --exclude <中心語A>
 ```
 
-`--aggregate-only` はコーパス本文（a・b・line）を出力から外すが、入力 A・B の文字列は残る。
+較正結果には旧 `third-concept-ratio` と `third-concept-token-joint-v2` の target/control 指標を含める。`--model` は意味 encoder ID、`--prefix-policy auto` は e5 ID に query/passsage prefix を付け、それ以外は prefix-free とする。未知モデルが別の入力形式を要求するときは `--prefix-policy e5` または `prefix-free` で明示する。token 方式の合成結果は探索的な幾何評価であり、統計的有意性を主張しない。
+
+`--aggregate-only` はコーパス本文（a・b・line）を JSON 出力から外すが、入力 A・B の文字列は残る。対照語リスト・コーパス・利用者入力を含める前にローカルで機微情報がないことを確認する。

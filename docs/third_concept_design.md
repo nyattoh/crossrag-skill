@@ -275,3 +275,34 @@ p が小さいと q の向きは埋め込みのノイズでほぼ決まる。比
 - 集計の平均は、対象が 0 件のとき 0.0 になる。実測の 0 と見分けるには `eligible_count` と selected の件数を併せて見る。
 - `explore()` は既定の third-concept 方式でも帰無分布を計算する。`heuristic_ratio.p_below_min` を出すためで、そのぶん 1 回あたり数千回の幾何計算が増える。
 - 1 文字のラベル（例: 「光」）は多くの文に部分一致するため、文入力では候補がまとめて除外されうる。除外の規模は `evaluation.eligible_count` / `excluded_count` で確認する。
+
+### 8.9 token 方式 `third-concept-token-joint-v2`
+
+`compare_third_concept.py` の control-pair calibration は、各候補文を文脈付き token embedding に変換し、新方式 `third-concept-token-joint-v2` で別に順位付けする。既存の `third-concept` / `third-concept-ratio` の定義や結果は変えない。`sentence_transformers` が `output_value="token_embeddings"` を提供しない encoder では、候補文全体の embedding 1 本へ退避する。この経路は token 単位の評価ではないので、encoder と集約モードを出力で確認する。
+
+候補行 i の token vector をそれぞれ単位化して算術平均し、候補方向 `c_i` とする。A/B は既存の query encoder で得た方向 `a0`, `b0` を単位化する。中心 `mu` は、単位化した `a0`, `b0` と全 eligible 候補の `c_i` の単純平均とし、同じ `mu` を3群から引いて再単位化した `a`, `b`, `c_i` で以下を計算する。候補文内の token 順は平均に影響せず、token を max pooling しない。
+
+- `side_A = max(0, a·c)`, `side_B = max(0, b·c)`。
+- `G = [[1, a·b], [a·b, 1]]`, `z = G⁻¹[a·c, b·c]ᵀ` とし、`z` の2成分を A/B 基底で展開した射影を `q` とする。`plane_support = clip(||q||² / ||c||², 0, 1)`。
+- `z_A,z_B ≥ -1e-12` かつ `max(z_A,0)+max(z_B,0)>1e-12` のときだけ正の錐内とする。その錐内で `balance = 2·min(max(z_A,0),max(z_B,0)) / (max(z_A,0)+max(z_B,0))`、`between_support = plane_support·(0.5+0.5·balance)`。錐外では 0。
+- `token_score = [((1+side_A)/2)·((1+side_B)/2)·between_support·plane_support]^(1/4)`。
+- 文内 token は単位化後の平均方向1本へまとめてからこの量を計算する（`mean-vector-geometric-v2`）。複数 token の句を使う場合も同じ集約規則。
+
+直交する単位 A/B と `mu=0` の既知ベクトルでは、`A+B` 二等分方向は `token_score=0.92388`、A 軸のみ・B 軸のみは各 `0.707107`、AB 平面に直交するノイズとゼロベクトルは 0 になる。スコアは正の倍率変更に不変で、A/B を交換しても総スコアは不変。共線アンカーは平面が退化するため 0。これは幾何上の診断量であり、単独ベクトルを明示文脈なしに埋めたときの「意味上の組合せ」を証明しない。文脈付き token vector でも意味的な必然性は測らず、人手評価が必要。
+
+### 8.10 ペア入替較正と帰無分布
+
+- `--control-pair LEFT|RIGHT` は明示対照ペアを複数回指定する。`--control-words <json-file>` は JSON 文字列配列から順不同の全組合せを作り、`--control-samples N --seed S` で非復元抽出する。指定ペアと語リストは同時に指定でき、明示ペアを評価する。
+- target と各 control は同じ候補コーパス・encoder・`input_kind`・`exclude`・`p_min`・`null_samples` で実行する。legacy `valid_rate` は除外後候補全体で `between_AB` が真となる割合。legacy top-k の有効率と token 方式の joint-supported 件数・割合、平均スコア、各支持成分、top-k を別々に出す。
+- pair percentile は control 値に対する中央順位 `100·(#(control < target)+0.5·#(control=target))/N`。descending rank は `1 + #(control > target)`（同順位は同じ competition rank）。これは指定された語彙・コーパスでの記述的比較であり、p 値でも有意差検定でもない。
+- controls は語彙選択に依存し、語を共有する対照同士は独立とは限らない。語の抽象度・頻度の差、コーパスの話題偏り、ペアの順序による方向性も残る。target が controls と交換可能である保証はない。少数の percentile/rank から母集団の有意性を主張しない。多重比較補正は行わない。
+- 既存 random/shuffled null と `p_min` は幾何上の目安として残す。埋め込み・話題の偏りを再現するペア入替 null の代わりではなく、有意性判定に使わない。
+- `--aggregate-only` は JSON から corpus `a` / `b` / `line` を再帰的に除く。候補は `corpus_index` で参照する。入力 A/B の文字列は出力に残るため、必要なら匿名化した入力を渡す。
+
+### 8.11 モデルと接頭辞 policy
+
+両 CLI の `--model MODEL_ID` は semantic encoder のモデル ID を選ぶ。既定 `--prefix-policy auto` は model ID に `e5` を含む場合 `query: ` / `passage: ` を付け、それ以外は接頭辞なしにする。`--prefix-policy e5` と `--prefix-policy prefix-free` で明示的に上書きできる。既に role prefix の付いたテキストへの二重付与はしない。`auto` の未知 ID は prefix-free とするが、そのモデル固有の指示形式が必要かは判定しないため、利用者がモデル仕様を確認して policy を指定する。HashEncoder には影響しない。
+
+### 8.12 合成評価と境界
+
+テストの fake encoder は、陽性（A+B の語を含む）、A のみ、B のみ、無関係、English/config 風の異質文、A/B の文字列を含まない組合せ例に決めたベクトルを割り当て、旧 `emergence_ratio` と token joint score を同じ既知幾何で比較する。語を含まない組合せ例は、fake encoder 上で陽性と同じベクトルなら同じ順位になる。これは embedding が与えた幾何の帰結であり、意味を発見した証拠ではない。token embedding の実モデルでの挙動、大きいモデルの比較、利用者データの結果は親が別途実行する。

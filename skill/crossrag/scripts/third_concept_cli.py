@@ -42,6 +42,7 @@ def main():
     parser.add_argument("--corpus")
     parser.add_argument("--encoder", choices=("hash", "semantic"), default="hash")
     parser.add_argument("--model", default="intfloat/multilingual-e5-small")
+    parser.add_argument("--prefix-policy", choices=("auto", "e5", "prefix-free"), default="auto")
     parser.add_argument("--limit", type=positive_limit, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--exclude", action="append", default=[])
@@ -59,7 +60,7 @@ def main():
             print(build_hypothesis_prompt(args.A, args.B))
             return
         corpus = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
-        encoder = make_encoder(args.encoder, args.model)
+        encoder = make_encoder(args.encoder, args.model, prefix_policy=args.prefix_policy)
         vocab = None
         if args.vocab:
             vocab = json.loads(Path(args.vocab).read_text(encoding="utf-8"))

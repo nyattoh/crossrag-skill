@@ -237,6 +237,120 @@ class CompareThirdConceptTest(unittest.TestCase):
 
 
 class ComparisonV3Test(unittest.TestCase):
+    def test_control_pair_calibration_is_seeded_and_reports_pair_percentile(self):
+        calibrate = getattr(comparison, "calibrate_control_pairs")
+        corpus = ["A and B together", "A alone", "B alone", "unrelated", "English config: enabled"]
+        encoder = make_encoder("hash")
+        first = calibrate("steam", "sleep", corpus, encoder, control_pairs=[("desk", "pencil"), ("snow", "bird")], seed=9, limit=2)
+        second = calibrate("steam", "sleep", corpus, encoder, control_pairs=[("desk", "pencil"), ("snow", "bird")], seed=9, limit=2)
+        self.assertEqual(first, second)
+        self.assertIn("pair_percentile", first["target"])
+        self.assertIn("token_wedge_pair_percentile", first["target"])
+        self.assertIn("token_wedge_top_k", first["target"])
+        self.assertIn("valid_rate", first["target"])
+        self.assertEqual(first["token_method"], "third-concept-token-joint-v2")
+        self.assertEqual(first["token_aggregation"], "mean-vector-geometric-v2")
+        for key in ("token_score_mean", "token_a_side_support_mean", "token_b_side_support_mean",
+                    "token_between_direction_support_mean", "token_plane_support_mean",
+                    "token_joint_supported_rate"):
+            self.assertIn(key, first["target"])
+        self.assertIn("independence_assumption", first["limitations"])
+        self.assertIn("interpretation", first["limitations"])
+        self.assertNotIn("significance", json.dumps(first).casefold())
+        self.assertEqual(first["token_method"], "third-concept-token-joint-v2")
+
+    def test_control_word_sampling_is_reproducible_and_keeps_synthetic_negative_cases(self):
+        calibrate = comparison.calibrate_control_pairs
+        corpus = [
+            "steam and sleep form a joint mechanism", "steam alone rises", "sleep alone restores",
+            "unrelated cedar orchard", "English config: mode=enabled", "A combination without steam or sleep",
+        ]
+        words = ["desk", "pencil", "snow", "bird", "copper", "orbit"]
+        first = calibrate("steam", "sleep", corpus, make_encoder("hash"), control_words=words, samples=5, seed=14, limit=2)
+        second = calibrate("steam", "sleep", corpus, make_encoder("hash"), control_words=words, samples=5, seed=14, limit=2)
+        self.assertEqual([item["pair"] for item in first["controls"]], [item["pair"] for item in second["controls"]])
+        self.assertEqual(first["target"]["control_count"], 5)
+        self.assertTrue(all("top_k_jaccard_vs_target" in item for item in first["controls"]))
+
+    def test_calibration_cli_aggregate_only_hides_corpus_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = [{"a": "MARKER-A", "b": "MARKER-B", "line": "MARKER-C combined"},
+                      {"a": "MARKER-D", "b": "MARKER-E", "line": "MARKER-F unrelated"}]
+            path = Path(tmp) / "synthetic.json"
+            path.write_text(json.dumps(corpus), encoding="utf-8")
+            completed = subprocess.run([
+                sys.executable, str(SCRIPTS / "compare_third_concept.py"), "--A", "steam", "--B", "sleep",
+                "--corpus", str(path), "--encoder", "hash", "--limit", "1", "--null-samples", "2",
+                "--control-pair", "desk|pencil", "--aggregate-only",
+            ], cwd=ROOT, capture_output=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
+        output = completed.stdout.decode("utf-8")
+        self.assertTrue(json.loads(output)["aggregate_only"])
+        self.assertIn("calibration", output)
+        self.assertNotIn("MARKER-", output)
+
+    def test_calibration_uses_full_eligible_corpus_and_same_exclusions_and_input_kind(self):
+        corpus = ["in-plane", "orthogonal", "exclude me"]
+        vectors = {
+            "steam": [1, 0, 0], "sleep": [0, 1, 0],
+            "desk": [1, 0, 0], "pencil": [0, 1, 0],
+            "A": [1, 0, 0], "B": [0, 1, 0], "in-plane": [1, 1, 0],
+            "orthogonal": [0, 0, 1], "exclude me": [1, 1, 0],
+            "x": [1, 0, 0], "y": [0, 1, 0],
+        }
+        result = comparison.calibrate_control_pairs(
+            "steam", "sleep", corpus, FixedEncoder(vectors),
+            control_pairs=[("desk", "pencil")], exclude=["exclude me"],
+            input_kind="sentence", limit=1, null_samples=4,
+        )
+        target = result["target"]
+        self.assertEqual(target["eligible_count"], 2)
+        self.assertEqual(target["valid_rate"], target["valid_count"] / target["eligible_count"])
+        self.assertEqual(target["valid_count"], 0)
+
+    def test_calibration_token_score_aggregates_joint_synthetic_roles(self):
+        corpus = ["joint", "A-only", "B-only", "unrelated", "English config", "word-absent joint"]
+        vectors = {
+            "steam": [1, 0, 0], "sleep": [0, 1, 0],
+            "desk": [1, 0, 0], "pencil": [0, 1, 0],
+            "joint": [1, 1, 0], "A-only": [1, 0.4, 0], "B-only": [0.4, 1, 0],
+            "unrelated": [0, 0, 1], "English config": [0, 0, 1],
+            "word-absent joint": [1, 1, 0],
+        }
+        result = comparison.calibrate_control_pairs(
+            "steam", "sleep", corpus, FixedEncoder(vectors), control_pairs=[("desk", "pencil")],
+            limit=2, null_samples=4,
+        )
+        target = result["target"]
+        self.assertEqual(target["eligible_count"], len(corpus))
+        self.assertEqual(target["token_joint_supported_count"], 2)
+        self.assertEqual(target["token_joint_supported_rate"], 1 / 3)
+        for key in ("token_score_mean", "token_a_side_support_mean", "token_b_side_support_mean",
+                    "token_between_direction_support_mean", "token_plane_support_mean"):
+            self.assertGreaterEqual(target[key], 0.0)
+            self.assertLessEqual(target[key], 1.0)
+
+    def test_markdown_renders_calibration_scores_and_all_token_criteria(self):
+        result = comparison.compare_methods("steam", "sleep", ["joint"], make_encoder("hash"), limit=1, null_samples=2)
+        summary = {
+            "pair_percentile": 75.0, "rank_descending": 2, "valid_rate": 0.5,
+            "valid_count": 1, "eligible_count": 2, "token_joint_supported_count": 1,
+            "token_joint_supported_rate": 0.5, "token_score_mean": 0.6,
+            "token_a_side_support_mean": 0.7, "token_b_side_support_mean": 0.8,
+            "token_between_direction_support_mean": 0.9, "token_plane_support_mean": 1.0,
+        }
+        result["calibration"] = {
+            "target": summary, "controls": [{"pair": ["x", "y"], **summary}],
+            "control_count": 1, "limitations": {"interpretation": "descriptive only"},
+        }
+        rendered = comparison.render_markdown(result)
+        self.assertIn("## Calibration", rendered)
+        self.assertIn("75.0", rendered)
+        self.assertIn("descriptive only", rendered)
+        self.assertIn("| target | 0.6000 | 0.7000 | 0.8000 | 0.9000 | 1.0000 | 0.5000 |", rendered)
+        self.assertIn("| x × y |", rendered)
+        self.assertNotIn("significance", rendered.casefold())
+
     def setUp(self):
         self.corpus_path = FIXTURES / "synthetic_corpus.json"
         self.corpus = load_corpus(self.corpus_path)

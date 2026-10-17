@@ -27,6 +27,7 @@ from third_concept import (
     null_geometry,
     rank_entries,
     shared_geometry_space,
+    token_geometry,
 )
 from third_concept_cli import read_corpus
 
@@ -76,9 +77,109 @@ EVALUATION_NOTES = [
     "wedge ablation compares each third-concept score with balance alone and with third-concept-no-wedge over all eligible rows.",
     "null random uses seeded isotropic vectors; null shuffled uses seeded coordinate permutations of centred passage vectors.",
     "percentile uses the mid-rank definition: 100 * (count(null < x) + 0.5 * count(null == x)) / n.",
+    "random/shuffled null percentiles and p_min are heuristic references; they do not model topic-matched controls or correct multiple comparisons.",
     "Results are reported even when they do not outperform baselines; objective-score means do not establish superiority.",
 ]
 DISCLAIMER = "全指標は探索用ヒューリスティックであり、人手評価は未実施。方式間の品質差や優越性を実証しない。"
+
+
+def calibrate_control_pairs(A, B, corpus, encoder, *, control_pairs=None, control_words=None, samples=20, seed=0, limit=5, input_kind="word", exclude=(), null_samples=1000, p_min=None):
+    """Compare the requested pair with seeded, corpus/model-matched lexical controls.
+
+    Calibration is descriptive; interpretation depends on how well the sampled
+    lexical controls represent the comparison of interest.
+    """
+    sampling_method = "provided" if control_pairs is not None else "uniform-without-replacement-from-word-combinations"
+    if type(samples) is not int or samples < 1:
+        raise ValueError("samples must be an integer at least 1")
+    if control_pairs is None:
+        words = list(dict.fromkeys(control_words or []))
+        if len(words) < 2:
+            raise ValueError("provide control_pairs or at least two control_words")
+        all_pairs = [(left, right) for i, left in enumerate(words) for right in words[i + 1:]
+                     if {left.casefold(), right.casefold()} != {A.casefold(), B.casefold()}]
+        if not all_pairs:
+            raise ValueError("control_words do not produce any non-target pairs")
+        rng = np.random.default_rng(seed)
+        chosen = rng.permutation(len(all_pairs))[:min(samples, len(all_pairs))]
+        control_pairs = [all_pairs[int(i)] for i in chosen]
+    control_pairs = [tuple(pair) for pair in control_pairs]
+    if not control_pairs or any(len(pair) != 2 or not all(isinstance(v, str) and v.strip() for v in pair) for pair in control_pairs):
+        raise ValueError("control_pairs must contain non-empty two-item pairs")
+    if any({a.casefold(), b.casefold()} == {A.casefold(), B.casefold()} for a, b in control_pairs):
+        raise ValueError("control_pairs must not contain the target pair")
+
+    candidate_texts = [row[2] if isinstance(row, (list, tuple)) else row.get("line", "") if isinstance(row, dict) else str(row) for row in corpus]
+    token_encoder = getattr(encoder, "encode_passage_tokens", None)
+    cached_token_vectors = token_encoder(candidate_texts) if token_encoder else [np.asarray([v]) for v in encoder.encode_passage(candidate_texts)]
+
+    def summarize(left, right):
+        result, space, metrics = _compare(left, right, corpus, encoder, limit=limit, seed=seed,
+                                          input_kind=input_kind, exclude=exclude, p_min=p_min,
+                                          null_samples=null_samples)
+        eligible_indices = [i for i, excluded_row in enumerate(exclusion_mask(space, left, right, exclude)) if not excluded_row]
+        valid_count = sum(bool(metrics[i]["between_AB"]) for i in eligible_indices)
+        valid_rate = valid_count / len(eligible_indices) if eligible_indices else 0.0
+        anchor_a = encoder.encode_query([left])[0]
+        anchor_b = encoder.encode_query([right])[0]
+        token_rows = token_geometry(anchor_a, anchor_b, [cached_token_vectors[i] for i in eligible_indices])
+        token_scores = {i: entry["score"] for i, entry in zip(eligible_indices, token_rows)}
+        token_order = sorted(token_scores, key=lambda index: (-token_scores[index], index))
+        token_top = token_order[:limit]
+        joint_supported = [
+            entry["a_side_support"] > 0 and entry["b_side_support"] > 0
+            and entry["between_direction_support"] > 0.5 and entry["plane_support"] > 0
+            for entry in token_rows
+        ]
+        def mean_criterion(key):
+            return float(np.mean([entry[key] for entry in token_rows])) if token_rows else 0.0
+        return {
+            "valid_rate": valid_rate,
+            "valid_count": valid_count,
+            "emergence_ratio_mean": result["evaluation"]["ratio_means"][RATIO_METHOD]["emergence_ratio"],
+            "top_k_emergence_ratio_mean": result["evaluation"]["ratio_means"][RATIO_METHOD]["emergence_ratio"],
+            "top_k_valid_rate": result["evaluation"]["ratio_means"][RATIO_METHOD]["between_AB_fraction"],
+            "top_k": [item["corpus_index"] for item in result["evaluation"]["methods"][RATIO_METHOD]["selected"]],
+            "token_wedge_valid_rate": float(np.mean(joint_supported)) if joint_supported else 0.0,
+            "token_joint_supported_count": int(sum(joint_supported)),
+            "token_joint_supported_rate": float(np.mean(joint_supported)) if joint_supported else 0.0,
+            "token_score_mean": mean_criterion("score"),
+            "token_a_side_support_mean": mean_criterion("a_side_support"),
+            "token_b_side_support_mean": mean_criterion("b_side_support"),
+            "token_between_direction_support_mean": mean_criterion("between_direction_support"),
+            "token_plane_support_mean": mean_criterion("plane_support"),
+            "token_wedge_top_k": token_top,
+            "token_wedge_top_k_mean": float(np.mean([token_scores[index] for index in token_top])) if token_top else 0.0,
+            "eligible_count": len(eligible_indices),
+        }
+
+    target = summarize(A, B)
+    controls = [{"pair": list(pair), **summarize(*pair)} for pair in control_pairs]
+    values = [item["valid_rate"] for item in controls]
+    target["pair_percentile"] = midrank_percentile(values, target["valid_rate"])
+    target["rank_descending"] = 1 + sum(value > target["valid_rate"] for value in values)
+    token_values = [item["token_wedge_valid_rate"] for item in controls]
+    target["token_wedge_pair_percentile"] = midrank_percentile(token_values, target["token_wedge_valid_rate"])
+    target["token_wedge_rank_descending"] = 1 + sum(value > target["token_wedge_valid_rate"] for value in token_values)
+    target["control_count"] = len(controls)
+    target_set = set(target["top_k"])
+    for item in controls:
+        other = set(item["top_k"])
+        item["top_k_jaccard_vs_target"] = len(target_set & other) / len(target_set | other) if target_set | other else 1.0
+        token_other = set(item["token_wedge_top_k"])
+        token_target = set(target["token_wedge_top_k"])
+        item["token_wedge_top_k_jaccard_vs_target"] = len(token_other & token_target) / len(token_other | token_target) if token_other | token_target else 1.0
+    return {
+        "token_method": "third-concept-token-joint-v2",
+        "token_aggregation": "mean-vector-geometric-v2",
+        "target": target,
+        "controls": controls,
+        "sampling": {"seed": int(seed), "method": sampling_method},
+        "limitations": {
+            "independence_assumption": "Descriptive lexical controls may share words; target/control lexical properties, corpus topic structure, and embedding geometry can differ. Pair sampling is not independent and may have orientation bias.",
+            "interpretation": "Calibration values are descriptive comparisons over the supplied candidates and controls.",
+        },
+    }
 
 
 def _normalise_input(text):
@@ -569,6 +670,24 @@ def render_markdown(result):
     lines.extend(["", "## Evaluation summary", ""])
     for name, item in result["evaluation"]["wedge_ablation"].items():
         lines.append(f"- {name}: tau vs balance = {item['kendall_tau_b_vs_balance']}; tau vs no-wedge = {item['kendall_tau_b_vs_no_wedge']}")
+    calibration = result.get("calibration")
+    if calibration:
+        target = calibration["target"]
+        lines.extend(["", "## Calibration", "",
+                      f"- Controls: {calibration['control_count']}",
+                      f"- Valid rate: {target['valid_rate']:.4f} ({target.get('valid_count', 'n/a')}/{target.get('eligible_count', 'n/a')})",
+                      f"- Pair percentile: {target['pair_percentile']:.1f}; descending rank: {target['rank_descending']}",
+                      f"- Token joint-supported rate: {target['token_joint_supported_rate']:.4f} ({target['token_joint_supported_count']}/{target['eligible_count']})",
+                      "",
+                      "| Pair | Score mean | A support | B support | Between support | Plane support | Joint-supported rate |",
+                      "|---|---:|---:|---:|---:|---:|---:|"])
+        for label, item in [("target", target), *((" × ".join(control["pair"]), control) for control in calibration["controls"])]:
+            lines.append(
+                f"| {label} | {item['token_score_mean']:.4f} | {item['token_a_side_support_mean']:.4f} | "
+                f"{item['token_b_side_support_mean']:.4f} | {item['token_between_direction_support_mean']:.4f} | "
+                f"{item['token_plane_support_mean']:.4f} | {item['token_joint_supported_rate']:.4f} |"
+            )
+        lines.extend(["", f"- Interpretation: {calibration['limitations']['interpretation']}"])
     lines.extend(["", "## Notes", ""])
     lines.extend(f"- {note}" for note in result["notes"])
     lines.extend(["", result["disclaimer"], ""])
@@ -636,12 +755,16 @@ def main():
     parser.add_argument("--corpus")
     parser.add_argument("--encoder", choices=("hash", "semantic"), default="hash")
     parser.add_argument("--model", default="intfloat/multilingual-e5-small")
+    parser.add_argument("--prefix-policy", choices=("auto", "e5", "prefix-free"), default="auto")
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--input-kind", choices=("word", "sentence"), default="word")
     parser.add_argument("--exclude", action="append", default=[])
     parser.add_argument("--p-min", type=float)
     parser.add_argument("--null-samples", type=positive_null_samples, default=1000)
+    parser.add_argument("--control-pair", action="append", default=[], help="control pair as LEFT|RIGHT; repeatable")
+    parser.add_argument("--control-words", help="JSON string array used to sample control pairs")
+    parser.add_argument("--control-samples", type=positive_null_samples, default=20)
     parser.add_argument("--aggregate-only", action="store_true")
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
     parser.add_argument("--sheet-dir")
@@ -656,7 +779,7 @@ def main():
         parser.error("--aggregate-only cannot be used with --sheet-dir")
     try:
         rows = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
-        encoder = make_encoder(args.encoder, args.model)
+        encoder = make_encoder(args.encoder, args.model, prefix_policy=args.prefix_policy)
         if args.A_sentence is not None:
             result = compare_pair(
                 (args.A, args.B), (args.A_sentence, args.B_sentence), rows, encoder, args.limit,
@@ -669,6 +792,20 @@ def main():
             )
             if args.sheet_dir:
                 write_blind_materials(result, rows, args.sheet_dir)
+        if args.control_pair or args.control_words:
+            pairs = []
+            for value in args.control_pair:
+                if value.count("|") != 1:
+                    parser.error("--control-pair must use LEFT|RIGHT")
+                pairs.append(tuple(part.strip() for part in value.split("|", 1)))
+            words = json.loads(Path(args.control_words).read_text(encoding="utf-8")) if args.control_words else None
+            if words is not None and not isinstance(words, list):
+                raise ValueError("control-words file must be a JSON string array")
+            result["calibration"] = calibrate_control_pairs(
+                args.A, args.B, rows, encoder, control_pairs=pairs or None, control_words=words,
+                samples=args.control_samples, seed=args.seed, limit=args.limit, input_kind=args.input_kind,
+                exclude=args.exclude, null_samples=args.null_samples, p_min=args.p_min,
+            )
         if args.aggregate_only:
             result = _strip_corpus_text(result)
             result["aggregate_only"] = True

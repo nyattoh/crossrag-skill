@@ -71,18 +71,141 @@ class ConceptEncoder:
     def encode(self, texts):
         return self.encode_query(texts)
 
+    def encode_passage_tokens(self, texts):
+        """Return contextual token vectors when the backend exposes them; otherwise one full-text vector per row."""
+        prepared = self._prepare(texts, "passage")
+        if isinstance(self.model, HashEncoder):
+            return [np.asarray([row], dtype=np.float64) for row in self.model.encode(prepared)]
+        try:
+            values = self.model.encode(prepared, output_value="token_embeddings", show_progress_bar=False)
+            return [np.asarray(value, dtype=np.float64) for value in values]
+        except (TypeError, ValueError, AttributeError):
+            encoded = self.encode_passage(texts)
+            return [np.asarray([row], dtype=np.float64) for row in encoded]
 
-def make_encoder(kind, model_id="intfloat/multilingual-e5-small", model=None):
+
+def make_encoder(kind, model_id="intfloat/multilingual-e5-small", model=None, prefix_policy="auto"):
     if kind == "hash":
         backend = model if model is not None else HashEncoder()
         return ConceptEncoder(backend, backend.name, "hash-ngram", None)
     if kind != "semantic":
         raise ValueError("encoder kind must be 'hash' or 'semantic'")
+    if prefix_policy not in {"auto", "e5", "prefix-free"}:
+        raise ValueError("prefix_policy must be 'auto', 'e5', or 'prefix-free'")
     backend = model
     if backend is None:
         backend = SentenceEncoder(model_id).model
-    prefix = {"query": "query: ", "passage": "passage: "} if "e5" in model_id.casefold() else None
+    # auto is deliberately closed-world: known e5 IDs get role prefixes; unknown IDs are prefix-free.
+    prefix = {"query": "query: ", "passage": "passage: "} if prefix_policy == "e5" or (prefix_policy == "auto" and "e5" in model_id.casefold()) else None
     return ConceptEncoder(backend, model_id + "（意味埋め込み）", model_id, prefix)
+
+
+def token_geometry(a_tokens, b_tokens, candidate_tokens, *, mu=None):
+    """Score joint A+B direction support from contextual token vectors.
+
+    All vectors share one model coordinate space; the default common centre is
+    the unweighted mean of the unit A anchor, unit B anchor, and each candidate
+    phrase's mean unit-token vector. Callers may supply an explicit shared ``mu``.
+    The centre is subtracted before direction measurements. Per candidate, token
+    directions are averaged (never max-pooled), then unit-normalised.
+
+    A/B side support is positive cosine (reported separately). Positive-cone
+    coordinates are obtained by solving the 2-anchor Gram system. Between support
+    is plane support times a balance term: 1 for an equal positive A+B mix, 0.5
+    on either positive cone boundary, and 0 outside the positive cone. Plane
+    support is squared projected-norm fraction. Final score is the fourth root
+    of the product of plane support, between support, and the two smoothed side
+    supports ``(1 + positive cosine) / 2``. Thus a single-side vector scores
+    below a balanced joint vector, while orthogonal-plane noise and zero vectors
+    score zero. This is a geometric diagnostic, not semantic/jointness detection.
+    """
+    def rows(value):
+        array = np.asarray(value, dtype=np.float64)
+        return np.atleast_2d(array)
+
+    def unit(vector):
+        norm = float(np.linalg.norm(vector))
+        return vector / norm if norm > 1e-15 else np.zeros_like(vector, dtype=np.float64)
+
+    a_raw, b_raw = rows(a_tokens), rows(b_tokens)
+    if a_raw.shape[1] != b_raw.shape[1]:
+        raise ValueError("A and B token vectors must have the same dimension")
+    a_raw, b_raw = np.mean(a_raw, axis=0), np.mean(b_raw, axis=0)
+    try:
+        candidate_array = np.asarray(candidate_tokens, dtype=np.float64)
+    except (ValueError, TypeError):
+        candidate_array = None
+    if candidate_array is None:
+        candidate_groups = [rows(group) for group in candidate_tokens]
+    elif candidate_array.ndim == 1:
+        candidate_groups = [candidate_array[None, :]]
+    elif candidate_array.ndim == 2:
+        candidate_groups = [candidate_array[index:index + 1] for index in range(len(candidate_array))]
+    elif candidate_array.ndim == 3:
+        candidate_groups = [candidate_array[index] for index in range(len(candidate_array))]
+    else:
+        raise ValueError("candidate_tokens must be a token-vector matrix or a batch of token-vector matrices")
+    if any(group.shape[1] != len(a_raw) for group in candidate_groups):
+        raise ValueError("candidate token vectors must match the A/B vector dimension")
+
+    pooled = []
+    for group in candidate_groups:
+        token_units = [unit(token) for token in group]
+        nonzero = [token for token in token_units if np.linalg.norm(token) > 0]
+        pooled.append(unit(np.mean(nonzero, axis=0)) if nonzero else np.zeros_like(a_raw))
+    a_unit, b_unit = unit(a_raw), unit(b_raw)
+    if mu is None:
+        centre_rows = [a_unit, b_unit, *pooled]
+        centre = np.mean(centre_rows, axis=0) if centre_rows else np.zeros_like(a_raw)
+    else:
+        centre = np.asarray(mu, dtype=np.float64)
+        if centre.shape != a_raw.shape:
+            raise ValueError("mu must match the A/B vector dimension")
+    a, b = unit(a_unit - centre), unit(b_unit - centre)
+    if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
+        return [{"score": 0.0, "wedge_norm": 0.0, "a_side_support": 0.0,
+                 "b_side_support": 0.0, "between_direction_support": 0.0,
+                 "plane_support": 0.0, "aggregation": "mean-vector-geometric-v2"}
+                for _ in candidate_groups]
+
+    gram = np.array([[np.dot(a, a), np.dot(a, b)], [np.dot(b, a), np.dot(b, b)]])
+    if float(np.linalg.det(gram)) <= 1e-10:
+        return [{"score": 0.0, "wedge_norm": 0.0, "a_side_support": 0.0,
+                 "b_side_support": 0.0, "between_direction_support": 0.0,
+                 "plane_support": 0.0, "aggregation": "mean-vector-geometric-v2"}
+                for _ in candidate_groups]
+    gram_inverse = np.linalg.pinv(gram, rcond=1e-12)
+    bisector = unit(a + b)
+    output = []
+    for c in pooled:
+        c = unit(c - centre)
+        if np.linalg.norm(c) == 0:
+            a_support = b_support = between = plane = score = 0.0
+        else:
+            a_cos = float(np.clip(np.dot(c, a), -1.0, 1.0))
+            b_cos = float(np.clip(np.dot(c, b), -1.0, 1.0))
+            a_support, b_support = max(0.0, a_cos), max(0.0, b_cos)
+            rhs = np.array([np.dot(a, c), np.dot(b, c)])
+            coefficients = gram_inverse @ rhs
+            projected = coefficients[0] * a + coefficients[1] * b
+            plane = float(np.clip(np.dot(projected, projected) / np.dot(c, c), 0.0, 1.0))
+            positive = np.maximum(coefficients, 0.0)
+            positive_sum = float(np.sum(positive))
+            positive_cone = bool(np.all(coefficients >= -1e-12)) and positive_sum > 1e-12
+            balance = 2 * float(np.min(positive)) / positive_sum if positive_cone else 0.0
+            between = plane * (0.5 + 0.5 * balance) if positive_cone else 0.0
+            factors = ((1 + a_support) / 2, (1 + b_support) / 2, between, plane)
+            score = float(np.prod(factors) ** 0.25)
+        output.append({
+            "score": float(np.clip(score, 0.0, 1.0)),
+            "wedge_norm": float(np.clip(score, 0.0, 1.0)),
+            "a_side_support": float(a_support),
+            "b_side_support": float(b_support),
+            "between_direction_support": float(np.clip(between, 0.0, 1.0)),
+            "plane_support": float(np.clip(plane, 0.0, 1.0)),
+            "aggregation": "mean-vector-geometric-v2",
+        })
+    return output
 
 
 def _centred_unit(vector, mu):
