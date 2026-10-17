@@ -47,6 +47,24 @@ class RecordingModel:
         return np.asarray(rows)
 
 
+class FixedEncoder:
+    name = "fixed"
+    model_id = "fixed"
+    prefix = None
+
+    def __init__(self, vectors):
+        self.vectors = {key: np.asarray(value, dtype=float) for key, value in vectors.items()}
+
+    def encode_query(self, texts):
+        return np.asarray([self.vectors[text] for text in texts])
+
+    def encode_passage(self, texts):
+        return np.asarray([self.vectors[text] for text in texts])
+
+    def encode(self, texts):
+        return self.encode_query(texts)
+
+
 class LegacyRegressionTest(unittest.TestCase):
     def test_engine_and_cli_match_snapshot(self):
         snapshot = json.loads((FIXTURES / "legacy_run_snapshot.json").read_text(encoding="utf-8"))
@@ -100,6 +118,22 @@ class EncoderAndGeometryTest(unittest.TestCase):
         self.assertEqual(rows[0]["emergence_norm"], 0.0)
         self.assertTrue(rows[0]["warnings"])
 
+    def test_geometry_treats_near_parallel_plane_as_degenerate_by_one_minus_rho(self):
+        rows = geometry([1, 0, 0], [1, 1e-4, 0], [[2, 1e-4, 0]])
+        self.assertEqual(rows[0]["emergence_norm"], 0.0)
+        self.assertTrue(rows[0]["warnings"])
+
+    def test_emergence_requires_positive_similarity_to_both_inputs(self):
+        rows = geometry([1, 0, 0], [0, 1, 0], [[1, -1, 0]])
+        self.assertAlmostEqual(rows[0]["plane_projection"], 1.0)
+        self.assertLess(rows[0]["s_B"], 0.0)
+        self.assertEqual(rows[0]["emergence_norm"], 0.0)
+
+    def test_geometry_supports_negative_input_correlation(self):
+        rows = geometry([1, 0, 0], [-0.5, np.sqrt(0.75), 0], [[0.5, np.sqrt(0.75), 0]])
+        self.assertLess(float(np.dot([1, 0, 0], [-0.5, np.sqrt(0.75), 0])), 0.0)
+        self.assertGreater(rows[0]["emergence_norm"], 0.0)
+
 
 class ExplorationContractTest(unittest.TestCase):
     def setUp(self):
@@ -113,12 +147,37 @@ class ExplorationContractTest(unittest.TestCase):
             self.assertEqual(len(ranked), 3)
             self.assertIn("scores", ranked[0])
 
+    def test_limit_must_be_positive(self):
+        for limit in (0, -1):
+            with self.subTest(limit=limit), self.assertRaisesRegex(ValueError, "limit must be at least 1"):
+                explore("湯気", "睡眠", self.corpus, self.encoder, limit=limit)
+
+    def test_excluded_count_does_not_depend_on_limit(self):
+        small = explore("ヨーグルト", "梅シロップ", self.corpus, self.encoder, limit=1)
+        large = explore("ヨーグルト", "梅シロップ", self.corpus, self.encoder, limit=20)
+        self.assertEqual(small["params"]["excluded_inputs"], large["params"]["excluded_inputs"])
+
+    def test_rank_entries_excludes_text_and_raw_cosine_input_matches(self):
+        corpus = [("safe-a", "safe-b", "safe-line"), ("A", "other", "text")]
+        texts = ["safe-aとsafe-b。safe-line", "Aとother。text"]
+        encoder = FixedEncoder(
+            {
+                "A": [1, 0, 0],
+                "B": [0, 1, 0],
+                texts[0]: [0.99, 0.01, 0],
+                texts[1]: [0, 0, 1],
+            }
+        )
+        for method in ("third-concept", "third-concept-no-wedge", "mean"):
+            self.assertEqual(rank_entries("A", "B", corpus, encoder, method, 5), [])
+
     def test_json_schema(self):
         data = explore("湯気", "睡眠", self.corpus, self.encoder, limit=5, corpus_path=self.corpus_path)
         self.assertTrue({"mode", "input", "encoder", "corpus_id", "corpus_size", "params", "origin_legend", "candidates", "warnings", "disclaimer"} <= data.keys())
         self.assertRegex(data["corpus_id"], r"^[0-9a-f]{16}$")
         self.assertTrue(data["disclaimer"])
         self.assertEqual(data["params"]["vocab_size"], 0)
+        self.assertIsNone(data["encoder"]["applied_to"])
         required = {"id", "concept", "origin", "generation_method", "relation_to_A_alone", "relation_to_B_alone", "why_requires_AB", "uncertainty", "falsification_or_check", "scores", "source"}
         score_keys = {"s_A", "s_B", "plane_projection", "residual", "emergence_norm", "balance", "unexpectedness_h", "coherence_h", "score_third"}
         for candidate in data["candidates"]:
@@ -159,6 +218,68 @@ class ExplorationContractTest(unittest.TestCase):
         llm_items = [item for item in combined["candidates"] if item["origin"] == "llm_hypothesis"]
         self.assertEqual([item["concept"] for item in llm_items], ["夜間蒸気計"])
         self.assertEqual(llm_items[0]["scores"]["llm_self_assessment"]["testability"], 5)
+
+    def test_shared_mean_keeps_same_concept_scores_equal_and_hypothesis_stable(self):
+        def hypothesis_items(concepts):
+            return {
+                "input": {"A": "湯気", "B": "睡眠"},
+                "generator": {"provider": "test", "model": "fake", "effort": "none", "prompt_sha256": "0", "date": "2026-10-18"},
+                "hypotheses": [
+                    {"concept": concept, "kind": "llm_hypothesis", "explanation": "x", "relation_to_A_alone": "x", "relation_to_B_alone": "x", "why_requires_AB": "x", "uncertainty": "x", "falsification_or_check": "x", "llm_self_assessment": None}
+                    for concept in concepts
+                ],
+            }
+
+        one = explore("湯気", "睡眠", self.corpus, self.encoder, limit=20, vocab=["夜間蒸気計"], hypotheses=hypothesis_items(["夜間蒸気計"]))
+        two = explore("湯気", "睡眠", self.corpus, self.encoder, limit=20, vocab=["夜間蒸気計"], hypotheses=hypothesis_items(["夜間蒸気計", "温度夢日誌"]))
+
+        def score(data, origin, concept):
+            return next(item["scores"]["heuristic_math"] for item in data["candidates"] if item["origin"] == origin and item["concept"] == concept)
+
+        self.assertEqual(score(one, "math", "夜間蒸気計"), score(one, "llm_hypothesis", "夜間蒸気計"))
+        self.assertEqual(score(one, "llm_hypothesis", "夜間蒸気計"), score(two, "llm_hypothesis", "夜間蒸気計"))
+
+    def test_zero_emergence_does_not_claim_geometric_ab_dependence(self):
+        data = explore("湯気", "睡眠", self.corpus, self.encoder, limit=20)
+        zero_items = [item for item in data["candidates"] if item["scores"]["heuristic_math"]["emergence_norm"] == 0.0]
+        self.assertTrue(zero_items)
+        self.assertTrue(all("幾何上は A∧B への依存を示さない" in item["why_requires_AB"] for item in zero_items))
+
+    def test_explore_encodes_corpus_entries_as_passages(self):
+        model = RecordingModel()
+        encoder = make_encoder("semantic", "intfloat/multilingual-e5-small", model=model)
+        explore("湯気", "睡眠", self.corpus[:2], encoder, limit=1)
+        expected = [f"passage: {a}と{b}。{line}" for a, b, line in self.corpus[:2]]
+        self.assertIn(expected, model.calls)
+
+    def test_hypothesis_input_mismatch_and_forbidden_word_are_rejected(self):
+        base = {
+            "input": {"A": "湯気", "B": "別入力"},
+            "generator": {"provider": "test", "model": "fake"},
+            "hypotheses": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hypotheses.json"
+            path.write_text(json.dumps(base, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                load_hypotheses(path, "湯気", "睡眠")
+            base["input"]["B"] = "睡眠"
+            base["hypotheses"] = [{"concept": "候補", "kind": "idea", "explanation": "confirmed", "relation_to_A_alone": "x", "relation_to_B_alone": "x", "why_requires_AB": "x", "uncertainty": "x", "falsification_or_check": "x", "llm_self_assessment": None}]
+            path.write_text(json.dumps(base, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "disallowed"):
+                load_hypotheses(path, "湯気", "睡眠")
+
+    def test_boolean_llm_self_assessment_is_rejected(self):
+        data = {
+            "input": {"A": "湯気", "B": "睡眠"},
+            "generator": {"provider": "test", "model": "fake"},
+            "hypotheses": [{"concept": "候補", "kind": "idea", "explanation": "x", "relation_to_A_alone": "x", "relation_to_B_alone": "x", "why_requires_AB": "x", "uncertainty": "x", "falsification_or_check": "x", "llm_self_assessment": {"unexpectedness": True, "coherence": 2, "emergence": 3, "testability": 4}}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hypotheses.json"
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "invalid llm_self_assessment"):
+                load_hypotheses(path, "湯気", "睡眠")
 
     def test_no_center_changes_geometry_and_is_recorded(self):
         centred = explore("湯気", "睡眠", self.corpus, self.encoder, limit=2, center=True, corpus_path=self.corpus_path)
@@ -208,6 +329,12 @@ class LeakageAndCliTest(unittest.TestCase):
         self.assertIn("概念A「湯気」", prompt)
         self.assertIn("概念B「睡眠」", prompt)
         self.assertIn('{"hypotheses": [...]}', prompt)
+
+    def test_cli_rejects_non_positive_limit(self):
+        command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "湯気", "--B", "睡眠", "--limit", "0"]
+        completed = subprocess.run(command, cwd=ROOT, capture_output=True)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(b"limit must be at least 1", completed.stderr)
 
 
 if __name__ == "__main__":

@@ -54,11 +54,12 @@ class CompareThirdConceptTest(unittest.TestCase):
                 set(method["means"]),
                 {"s_A", "s_B", "plane_projection", "residual", "emergence_norm", "score_third"},
             )
+        for name, method in result["methods"].items():
             for selected in method["selected"]:
-                self.assertEqual(
-                    set(selected),
-                    {"corpus_index", "a", "b", "metrics"},
-                )
+                expected = {"corpus_index", "a", "b", "metrics"}
+                if name in ("similar", "orthogonal", "wedge", "random"):
+                    expected.add("contains_input")
+                self.assertEqual(set(selected), expected)
 
     def test_common_encoder_corpus_and_limit_are_recorded_once(self):
         result = self.compare(limit=2)
@@ -93,15 +94,15 @@ class CompareThirdConceptTest(unittest.TestCase):
             )
 
     def test_whitespace_normalization_is_recorded_and_applied_to_every_method(self):
-        result = self.compare(A="H2O MEMORY", B="TRA JEXA", limit=3)
+        result = self.compare(A="H2O/MEMORY", B="TRA JEXA", limit=3)
         self.assertEqual(
             result["input_normalization"],
             {
-                "A": {"original": "H2O MEMORY", "used": "H2O_MEMORY"},
+                "A": {"original": "H2O/MEMORY", "used": "H2O_MEMORY"},
                 "B": {"original": "TRA JEXA", "used": "TRA_JEXA"},
             },
         )
-        self.assertEqual(result["input"], {"A": "H2O MEMORY", "B": "TRA JEXA"})
+        self.assertEqual(result["input"], {"A": "H2O/MEMORY", "B": "TRA JEXA"})
         encoder = make_encoder("hash")
         for name in ("similar", "orthogonal", "wedge", "random"):
             expected = run("H2O_MEMORY、TRA_JEXA", self.corpus, name, limit=3, encoder=encoder)
@@ -109,6 +110,21 @@ class CompareThirdConceptTest(unittest.TestCase):
                 [item["corpus_index"] for item in result["methods"][name]["selected"]],
                 [item["index"] for item in expected["selected"]],
             )
+
+    def test_third_concept_methods_exclude_inputs_but_baselines_mark_them(self):
+        result = self.compare(A="ヨーグルト", B="梅シロップ", limit=5)
+        for name in ("third-concept", "mean", "third-concept-no-wedge"):
+            self.assertNotIn(0, {item["corpus_index"] for item in result["methods"][name]["selected"]})
+            self.assertNotIn(1, {item["corpus_index"] for item in result["methods"][name]["selected"]})
+        baseline_items = [item for name in ("similar", "orthogonal", "wedge", "random") for item in result["methods"][name]["selected"]]
+        self.assertTrue(any(item["contains_input"] for item in baseline_items))
+        self.assertTrue(any("not exclusion-filtered" in note for note in result["notes"]))
+        self.assertTrue(any("seed" in note and "engine" in note and "random" in note for note in result["notes"]))
+
+    def test_dict_rows_use_the_validated_corpus_path(self):
+        dict_rows = [{"a": a, "b": b, "line": line} for a, b, line in self.corpus]
+        result = compare_methods("湯気", "睡眠", dict_rows, make_encoder("hash"), limit=2)
+        self.assertEqual(result["corpus_size"], len(dict_rows))
 
     def test_jaccard_matrix_is_symmetric_and_has_unit_diagonal(self):
         result = self.compare()
@@ -130,6 +146,8 @@ class CompareThirdConceptTest(unittest.TestCase):
         self.assertEqual(first_sheet, second_sheet)
         self.assertEqual(first_key, second_key)
         self.assertIn("未実施", first_sheet)
+        self.assertIn("Input A: `H2O MEMORY`", first_sheet)
+        self.assertIn("Input B: `TRAJEXA`", first_sheet)
         for forbidden in (*METHOD_NAMES, "score", "スコア"):
             self.assertNotIn(forbidden, first_sheet)
         self.assertIn("Unexpectedness", first_sheet)
