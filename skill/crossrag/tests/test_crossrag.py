@@ -24,6 +24,13 @@ class WedgeDegenerateTest(unittest.TestCase):
         self.assertEqual(len(result['selected']), 1)
         self.assertTrue(any('wedge' in w for w in result['warnings']))
 
+    def test_no_warning_when_only_an_unselected_candidate_has_wedge(self):
+        # Top pick has wedge 0, but a non-selected candidate is nonzero: must not warn.
+        corpus = DEFAULT_CORPUS + [('カレー', '犬', 'y')]
+        result = run('犬、カレー、夕暮れ、帰宅', corpus, 'wedge', 0.55, 0.8, 1, HashEncoder())
+        self.assertEqual(result['selected'][0]['wedge'], 0.0)
+        self.assertEqual(result['warnings'], [])
+
     def test_warning_names_the_encoder(self):
         result = run('犬、カレー、夕暮れ、帰宅', DEFAULT_CORPUS, 'wedge', 0.55, 0.8, 5, HashEncoder())
         self.assertIn(HashEncoder.name, result['warnings'][0])
