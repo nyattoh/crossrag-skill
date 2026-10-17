@@ -231,3 +231,80 @@ Exit code: `0`
 Ran 26 tests in 2.156s
 OK
 ```
+
+## F1 review fixes
+
+### Red
+
+Command (working directory: `skill/crossrag`):
+
+```text
+python -m unittest discover -s tests -v
+```
+
+Exit code: `1`
+
+```text
+Ran 40 tests in 3.330s
+FAILED (failures=13)
+```
+
+Failing tests and representative lines:
+
+```text
+test_all_methods_select_the_requested_number_of_corpus_entries
+  Items in the second set but not the first: 'contains_input'
+test_blind_sheet_is_method_and_score_blind_and_key_maps_back
+  'Input A: `H2O MEMORY`' not found
+test_third_concept_methods_exclude_inputs_but_baselines_mark_them
+  0 unexpectedly found in {0, 1, 3, 6, 7}
+test_whitespace_normalization_is_recorded_and_applied_to_every_method
+  'H2O/MEMORY' != 'H2O_MEMORY'
+test_geometry_treats_near_parallel_plane_as_degenerate_by_one_minus_rho
+  0.9999999111821575 != 0.0
+test_boolean_llm_self_assessment_is_rejected
+  ValueError not raised
+test_json_schema
+  encoder.applied_to was not None for hash
+test_limit_must_be_positive (limit=0)
+test_limit_must_be_positive (limit=-1)
+  ValueError not raised
+test_rank_entries_excludes_text_and_raw_cosine_input_matches
+  excluded rows were returned
+test_shared_mean_keeps_same_concept_scores_equal_and_hypothesis_stable
+  math and llm_hypothesis scores differed
+test_zero_emergence_does_not_claim_geometric_ab_dependence
+  required wording was absent
+test_cli_rejects_non_positive_limit
+  return code 0 == 0
+```
+
+The existing UTF-8, wedge-warning, legacy engine/CLI snapshot, prefix, leakage, schema, and origin-separation tests passed in the same RED run.
+
+### Green
+
+Command (working directory: `skill/crossrag`):
+
+```text
+python -m unittest discover -s tests -v
+```
+
+Exit code: `0`
+
+```text
+Ran 40 tests in 2.752s
+OK
+```
+
+Additional checks:
+
+| Command | Exit |
+|---|---:|
+| `python -m py_compile scripts/third_concept.py scripts/third_concept_cli.py scripts/compare_third_concept.py` | 0 |
+| `git diff --check` | 0 |
+
+### v2 real-corpus rerun
+
+All 24 requested CLI/comparison commands exited `0`. Semantic commands ran with `HF_HUB_OFFLINE=1`. The exact command templates, case substitutions, per-output exit codes, and SHA-256 values are recorded in `docs/third_concept_report.md` sections 7.1–7.3. Outputs are under `D:\inbox\crossrag-third-concept\v2\`; the corpus remained `corpus_id=26636196c50a5d08`, 51 entries.
+
+The semantic runs again emitted `embeddings.position_ids | UNEXPECTED`; JSON and Markdown generation still exited `0`. The earlier `t1`, `t3`, and `t4` numeric outputs are superseded by v2.
