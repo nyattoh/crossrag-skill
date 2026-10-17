@@ -56,6 +56,7 @@ e5 の埋め込みはコサインが全体に高く偏る（異方性）。幾�
   - 平面との関係のうち、A 軸・B 軸のどちらか単独では説明できない分。
   - 上界は (1 − ρ)/2（二等分方向かつ p = 1）。emergence_norm = clip(emergence / ((1 − ρ)/2), 0, 1)。
 - balance = 2·p·r ∈ [0,1] … 半分は AB 平面で説明でき、半分は新しい方向（p = r = 1/√2 で最大）
+  - 平面への射影が A+B の側を向く（s_mean > 0）ときだけ数え、それ以外は 0。A・B の両方と逆向きの候補が上位に来るのを防ぐ。
 - unexpectedness_h = clip(1 − max(s_A, s_B, 0), 0, 1)
 - coherence_h = p（平面との関係の強さ。説明の整合性そのものではない）
 - **score_third = 0.5·emergence_norm + 0.5·balance**

@@ -113,6 +113,17 @@ class EncoderAndGeometryTest(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["emergence_norm"], 0.0)
         self.assertAlmostEqual(rows[2]["balance"], 1.0)
 
+    def test_balance_ignores_projection_pointing_away_from_A_and_B(self):
+        a = np.array([1.0, 0.0, 0.0, 0.0])
+        b = np.array([0.0, 1.0, 0.0, 0.0])
+        towards = [0.5, 0.5, np.sqrt(0.5), 0.0]
+        away = [-0.5, -0.5, np.sqrt(0.5), 0.0]
+        rows = geometry(a, b, np.asarray([towards, away]))
+        self.assertAlmostEqual(rows[0]["balance"], 1.0)
+        self.assertAlmostEqual(rows[1]["plane_projection"], rows[0]["plane_projection"])
+        self.assertEqual(rows[1]["balance"], 0.0)
+        self.assertEqual(rows[1]["score_third"], 0.0)
+
     def test_geometry_warns_for_degenerate_plane(self):
         rows = geometry([1, 0, 0], [1, 1e-10, 0], [[0, 1, 0]])
         self.assertEqual(rows[0]["emergence_norm"], 0.0)

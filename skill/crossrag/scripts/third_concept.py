@@ -115,9 +115,10 @@ def geometry(a_vec, b_vec, c_vecs, mu=None):
         if not degenerate and s_a > 0.0 and s_b > 0.0:
             emergence = max(0.0, p_sq - max(s_a * s_a, s_b * s_b))
         emergence_norm = float(np.clip(emergence / upper_bound, 0.0, 1.0)) if upper_bound > 1e-12 else 0.0
-        balance = float(np.clip(2.0 * p * residual, 0.0, 1.0))
-        unexpectedness = float(np.clip(1.0 - max(s_a, s_b, 0.0), 0.0, 1.0))
         s_mean = float(np.clip(np.dot(c, mean_direction), -1.0, 1.0)) if np.linalg.norm(mean_direction) else 0.0
+        # The in-plane projection must point towards A+B; a candidate opposed to both is not "half explained" by them.
+        balance = float(np.clip(2.0 * p * residual, 0.0, 1.0)) if s_mean > 0.0 else 0.0
+        unexpectedness = float(np.clip(1.0 - max(s_a, s_b, 0.0), 0.0, 1.0))
         score_no_wedge = 2.0 * s_mean * math.sqrt(max(0.0, 1.0 - s_mean * s_mean))
         results.append(
             {
