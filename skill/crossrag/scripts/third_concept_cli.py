@@ -12,6 +12,13 @@ from run import load_corpus
 from third_concept import build_hypothesis_prompt, explore, load_hypotheses, make_encoder
 
 
+def positive_limit(value):
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("limit must be at least 1")
+    return parsed
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Explore third-concept candidates from A and B")
@@ -20,7 +27,7 @@ def main():
     parser.add_argument("--corpus")
     parser.add_argument("--encoder", choices=("hash", "semantic"), default="hash")
     parser.add_argument("--model", default="intfloat/multilingual-e5-small")
-    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--limit", type=positive_limit, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--vocab")
     parser.add_argument("--hypotheses")

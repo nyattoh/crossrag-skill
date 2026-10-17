@@ -98,6 +98,7 @@ class CompareThirdConceptTest(unittest.TestCase):
         self.assertEqual(
             result["input_normalization"],
             {
+                "rule": r"[、,，/／\s]+ -> _",
                 "A": {"original": "H2O/MEMORY", "used": "H2O_MEMORY"},
                 "B": {"original": "TRA JEXA", "used": "TRA_JEXA"},
             },

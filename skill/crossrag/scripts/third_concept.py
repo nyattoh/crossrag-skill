@@ -24,6 +24,11 @@ SCORE_KEYS = (
     "coherence_h",
     "score_third",
 )
+SCORE_BY_METHOD = {
+    "third-concept": "score_third",
+    "third-concept-no-wedge": "score_no_wedge",
+    "mean": "s_mean",
+}
 
 
 class ConceptEncoder:
@@ -93,7 +98,7 @@ def geometry(a_vec, b_vec, c_vecs, mu=None):
     rho = float(np.clip(np.dot(a, b), -1.0, 1.0))
     e2_raw = b - rho * a
     e2_norm = float(np.linalg.norm(e2_raw))
-    degenerate = e2_norm < 1e-6
+    degenerate = e2_norm < 1e-6 or (1.0 - rho) < 1e-6
     e2 = np.zeros_like(a) if degenerate else e2_raw / e2_norm
     mean_direction = normalise(a + b)
     upper_bound = max(0.0, (1.0 - rho) / 2.0)
@@ -144,26 +149,75 @@ def _rows(corpus):
     return rows
 
 
-def _rank_vectors(A, B, texts, encoder, kind, method, limit, center=True):
-    query_vectors = encoder.encode_query([A, B])
-    candidate_vectors = encoder.encode_passage(texts) if kind == "passage" else encoder.encode_query(texts)
-    combined = np.vstack([query_vectors, candidate_vectors])
-    mu = np.mean(combined, axis=0) if center else None
-    metrics = geometry(query_vectors[0], query_vectors[1], candidate_vectors, mu=mu)
-    score_name = {"third-concept": "score_third", "third-concept-no-wedge": "score_no_wedge", "mean": "s_mean"}[method]
-    order = sorted(range(len(texts)), key=lambda index: (-metrics[index][score_name], index))
+def _vocabulary_pool(rows, vocab=None):
+    pool = []
+    for a, b, _ in rows:
+        for value in (a, b):
+            if value not in pool:
+                pool.append(value)
+    for value in vocab or []:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("vocab entries must be non-empty strings")
+        if value not in pool:
+            pool.append(value)
+    return pool
+
+
+def shared_geometry_space(A, B, corpus, encoder, vocab=None, center=True):
+    """Encode one exploration space and compute its single shared centring mean."""
+    rows = _rows(corpus)
+    pool = _vocabulary_pool(rows, vocab)
+    query_texts = []
+    for value in (A, B, *pool):
+        if value not in query_texts:
+            query_texts.append(value)
+    query_vectors = encoder.encode_query(query_texts)
+    query_by_text = dict(zip(query_texts, query_vectors))
+    passage_texts = [f"{a}と{b}。{line}" for a, b, line in rows]
+    passage_vectors = encoder.encode_passage(passage_texts)
+    all_vectors = np.vstack([query_vectors, passage_vectors])
+    return {
+        "rows": rows,
+        "pool": pool,
+        "pool_vectors": np.asarray([query_by_text[value] for value in pool]),
+        "passage_texts": passage_texts,
+        "passage_vectors": passage_vectors,
+        "a_vector": query_by_text[A],
+        "b_vector": query_by_text[B],
+        "mu": np.mean(all_vectors, axis=0) if center else None,
+    }
+
+
+def _rank_vectors(a_vector, b_vector, candidate_vectors, method, limit, mu):
+    metrics = geometry(a_vector, b_vector, candidate_vectors, mu=mu)
+    score_name = SCORE_BY_METHOD[method]
+    order = sorted(range(len(metrics)), key=lambda index: (-metrics[index][score_name], index))
     return [(index, metrics[index]) for index in order[: max(0, int(limit))]]
 
 
-def rank_entries(A, B, corpus, encoder, method, limit):
-    if method not in {"third-concept", "third-concept-no-wedge", "mean"}:
+def rank_entries(A, B, corpus, encoder, method, limit, center=True, space=None, exclusion_inputs=None):
+    if method not in SCORE_BY_METHOD:
         raise ValueError("unknown third-concept ranking method")
-    rows = _rows(corpus)
-    texts = [f"{a}と{b}。{line}" for a, b, line in rows]
+    if int(limit) < 1:
+        raise ValueError("limit must be at least 1")
+    space = space or shared_geometry_space(A, B, corpus, encoder, center=center)
+    rows = space["rows"]
+    texts = space["passage_texts"]
+    exclusion_a, exclusion_b = exclusion_inputs or (A, B)
+    cosine_excluded = _raw_cosine_exclusion_mask_from_vectors(
+        space["passage_vectors"], space["a_vector"], space["b_vector"]
+    )
     ranked = []
-    for index, scores in _rank_vectors(A, B, texts, encoder, "passage", method, limit):
+    all_ranked = _rank_vectors(
+        space["a_vector"], space["b_vector"], space["passage_vectors"], method, len(rows), space["mu"]
+    )
+    for index, scores in all_ranked:
         a, b, line = rows[index]
-        ranked.append({"index": index, "a": a, "b": b, "line": line, "score": scores[{"third-concept": "score_third", "third-concept-no-wedge": "score_no_wedge", "mean": "s_mean"}[method]], "scores": scores})
+        if any(_contains_input(value, exclusion_a, exclusion_b) for value in (a, b, line)) or cosine_excluded[index]:
+            continue
+        ranked.append({"index": index, "a": a, "b": b, "line": line, "score": scores[SCORE_BY_METHOD[method]], "scores": scores})
+        if len(ranked) >= int(limit):
+            break
     return ranked
 
 
@@ -180,10 +234,9 @@ def _contains_input(candidate, A, B):
     return False
 
 
-def _raw_cosine_excluded(candidate, A, B, encoder, kind="query"):
-    anchors = encoder.encode_query([A, B])
-    vector = encoder.encode_passage([candidate])[0] if kind == "passage" else encoder.encode_query([candidate])[0]
-    return any(float(np.dot(normalise(vector), normalise(anchor))) >= 0.98 for anchor in anchors)
+def _raw_cosine_exclusion_mask_from_vectors(vectors, a_vector, b_vector):
+    unit_anchors = [normalise(a_vector), normalise(b_vector)]
+    return [any(float(np.dot(normalise(vector), anchor)) >= 0.98 for anchor in unit_anchors) for vector in vectors]
 
 
 def _raw_cosine_exclusion_mask(candidates, A, B, encoder, kind="query"):
@@ -191,8 +244,7 @@ def _raw_cosine_exclusion_mask(candidates, A, B, encoder, kind="query"):
         return []
     anchors = encoder.encode_query([A, B])
     vectors = encoder.encode_passage(candidates) if kind == "passage" else encoder.encode_query(candidates)
-    unit_anchors = [normalise(anchor) for anchor in anchors]
-    return [any(float(np.dot(normalise(vector), anchor)) >= 0.98 for anchor in unit_anchors) for vector in vectors]
+    return _raw_cosine_exclusion_mask_from_vectors(vectors, anchors[0], anchors[1])
 
 
 def _public_scores(scores):
@@ -222,7 +274,7 @@ def load_hypotheses(path, A, B):
         assessment = item.get("llm_self_assessment")
         if assessment is not None:
             expected = {"unexpectedness", "coherence", "emergence", "testability"}
-            if set(assessment) != expected or any(not isinstance(value, int) or not 1 <= value <= 5 for value in assessment.values()):
+            if set(assessment) != expected or any(type(value) is not int or not 1 <= value <= 5 for value in assessment.values()):
                 raise ValueError("invalid llm_self_assessment")
     serialised = json.dumps(data, ensure_ascii=False)
     if re.search(r"(?i)\b(?:verified|proven|confirmed)\b|証明済|検証済", serialised):
@@ -251,60 +303,70 @@ def _candidate(origin, number, concept, scores, generation_method, relation_a, r
     return result
 
 
+def _why_requires_ab(scores):
+    if scores["emergence_norm"] == 0.0:
+        return "幾何上は A∧B への依存を示さない（emergence_norm=0.000）。意味的必然性は未検証"
+    p_sq = scores["plane_projection"] ** 2
+    single_sq = max(scores["s_A"] ** 2, scores["s_B"] ** 2)
+    return f"p²={p_sq:.3f} が単独最大 {single_sq:.3f} を上回る（emergence_norm={scores['emergence_norm']:.3f}）。意味的必然性は未検証"
+
+
 def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None, center=True, corpus_path=None):
-    rows = _rows(corpus)
+    if int(limit) < 1:
+        raise ValueError("limit must be at least 1")
+    space = shared_geometry_space(A, B, corpus, encoder, vocab=vocab, center=center)
+    rows = space["rows"]
     warnings = []
     excluded = 0
     candidates = []
 
-    passage_texts = [f"{a}と{b}。{line}" for a, b, line in rows]
-    ranked_passages = _rank_vectors(A, B, passage_texts, encoder, "passage", "third-concept", len(rows), center)
-    passage_cosine_excluded = _raw_cosine_exclusion_mask(passage_texts, A, B, encoder, "passage")
+    ranked_passages = _rank_vectors(
+        space["a_vector"], space["b_vector"], space["passage_vectors"], "third-concept", len(rows), space["mu"]
+    )
+    passage_cosine_excluded = _raw_cosine_exclusion_mask_from_vectors(
+        space["passage_vectors"], space["a_vector"], space["b_vector"]
+    )
     retrieved_number = 0
     for index, scores in ranked_passages:
         a, b, line = rows[index]
         if any(_contains_input(value, A, B) for value in (a, b, line)) or passage_cosine_excluded[index]:
             excluded += 1
             continue
-        retrieved_number += 1
-        candidates.append(
-            _candidate(
-                "retrieved",
-                retrieved_number,
-                line,
-                scores,
-                "third-concept score over corpus passages",
-                f"s_A={scores['s_A']:.3f}（中心化コサイン）",
-                f"s_B={scores['s_B']:.3f}（中心化コサイン）",
-                f"emergence_norm={scores['emergence_norm']:.3f}, balance={scores['balance']:.3f}。意味的必然性は未検証",
-                "コーパス内の記述であること以外は未確認。幾何スコアは探索用代理指標。",
-                "出典記述と A・B の関係を独立に確認する。",
-                {"corpus_index": index, "a": a, "b": b, "line": line},
+        if retrieved_number < int(limit):
+            retrieved_number += 1
+            candidates.append(
+                _candidate(
+                    "retrieved",
+                    retrieved_number,
+                    line,
+                    scores,
+                    "third-concept score over corpus passages",
+                    f"s_A={scores['s_A']:.3f}（中心化コサイン）",
+                    f"s_B={scores['s_B']:.3f}（中心化コサイン）",
+                    _why_requires_ab(scores),
+                    "コーパス内の記述であること以外は未確認。幾何スコアは探索用代理指標。",
+                    "出典記述と A・B の関係を独立に確認する。",
+                    {"corpus_index": index, "a": a, "b": b, "line": line},
+                )
             )
-        )
-        warnings.extend(scores["warnings"])
-        if retrieved_number >= limit:
-            break
+            warnings.extend(scores["warnings"])
 
-    pool = []
-    for a, b, _ in rows:
-        for value in (a, b):
-            if value not in pool:
-                pool.append(value)
-    for value in vocab or []:
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("vocab entries must be non-empty strings")
-        if value not in pool:
-            pool.append(value)
-    pool_cosine_excluded = _raw_cosine_exclusion_mask(pool, A, B, encoder)
+    pool = space["pool"]
+    pool_cosine_excluded = _raw_cosine_exclusion_mask_from_vectors(
+        space["pool_vectors"], space["a_vector"], space["b_vector"]
+    )
     kept_pool = []
-    for value, cosine_excluded in zip(pool, pool_cosine_excluded):
+    kept_pool_vectors = []
+    for value, vector, cosine_excluded in zip(pool, space["pool_vectors"], pool_cosine_excluded):
         if _contains_input(value, A, B) or cosine_excluded:
             excluded += 1
         else:
             kept_pool.append(value)
+            kept_pool_vectors.append(vector)
     if kept_pool:
-        ranked_math = _rank_vectors(A, B, kept_pool, encoder, "query", "third-concept", min(limit, len(kept_pool)), center)
+        ranked_math = _rank_vectors(
+            space["a_vector"], space["b_vector"], np.asarray(kept_pool_vectors), "third-concept", min(int(limit), len(kept_pool)), space["mu"]
+        )
         for number, (index, scores) in enumerate(ranked_math, 1):
             concept = kept_pool[index]
             candidates.append(
@@ -316,7 +378,7 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
                     "third-concept score over vocabulary pool",
                     f"s_A={scores['s_A']:.3f}（中心化コサイン）",
                     f"s_B={scores['s_B']:.3f}（中心化コサイン）",
-                    f"emergence_norm={scores['emergence_norm']:.3f}, balance={scores['balance']:.3f}。意味的必然性は未検証",
+                    _why_requires_ab(scores),
                     "候補語彙プール内の位置だけを示す。意味的妥当性は未検証。",
                     "A・B の組合せに依存する説明が再現できるか人手で確認する。",
                     {},
@@ -342,7 +404,10 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
                 accepted.append(item)
         if accepted:
             texts = [item["concept"] for item in accepted]
-            ranked = _rank_vectors(A, B, texts, encoder, "query", "third-concept", len(texts), center)
+            hypothesis_vectors = encoder.encode_query(texts)
+            ranked = _rank_vectors(
+                space["a_vector"], space["b_vector"], hypothesis_vectors, "third-concept", len(texts), space["mu"]
+            )
             metrics_by_index = {index: scores for index, scores in ranked}
             counters = {"llm_hypothesis": 0, "idea": 0}
             for index, item in enumerate(accepted):
@@ -377,7 +442,7 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
             "name": encoder.name,
             "model_id": encoder.model_id,
             "prefix": encoder.prefix,
-            "applied_to": {"query": ["A", "B", "concept candidates"], "passage": ["corpus entries"]},
+            "applied_to": None if encoder.prefix is None else {"query": ["A", "B", "concept candidates"], "passage": ["corpus entries"]},
         },
         "corpus_id": corpus_id(rows, corpus_path),
         "corpus_size": len(rows),

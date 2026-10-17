@@ -13,7 +13,7 @@ import numpy as np
 
 from engine import DEFAULT_CORPUS, run
 from run import load_corpus
-from third_concept import corpus_id, geometry, make_encoder, rank_entries
+from third_concept import _contains_input, _rows, corpus_id, geometry, make_encoder, rank_entries, shared_geometry_space
 
 
 METHOD_NAMES = (
@@ -37,12 +37,14 @@ NOTES = [
     'similar / orthogonal / wedge / random は engine.run() を通り、その encode() は全テキストに "query: " を適用する。',
     "third-concept は score_third を目的関数として選ぶため、score_third の平均で高くなることは循環的であり、各平均は記述値にすぎず、優越性の証拠ではない。",
     "third-concept がベースラインと異ならない結果も、そのまま報告する。",
+    "Baselines are not exclusion-filtered; baseline の contains_input は入力概念との文字列一致・包含を示す。",
+    "seed は評価シートのシャッフルにだけ使われ、engine.run() の random baseline は context とコーパス対の hash で決まる。",
 ]
 DISCLAIMER = "全指標は探索用ヒューリスティックであり、人手評価は未実施。方式間の品質差や優越性を実証しない。"
 
 
 def _normalise_input(text):
-    return re.sub(r"\s+", "_", text.strip())
+    return re.sub(r"[、,，/／\s]+", "_", text.strip()).strip("_")
 
 
 def _public_metrics(metrics):
@@ -63,9 +65,21 @@ def _jaccard(left, right):
     return round(len(left & right) / len(union), 6) if union else 1.0
 
 
+def _selected_entry(name, index, rows, common_metrics, A, B):
+    entry = {
+        "corpus_index": index,
+        "a": rows[index][0],
+        "b": rows[index][1],
+        "metrics": _public_metrics(common_metrics[index]),
+    }
+    if name in METHOD_NAMES[:4]:
+        entry["contains_input"] = any(_contains_input(value, A, B) for value in rows[index])
+    return entry
+
+
 def compare_methods(A, B, corpus, encoder, limit=5, seed=0, corpus_path=None):
     """Run all seven methods and recompute their metrics in one representation."""
-    rows = [tuple(row) for row in corpus]
+    rows = _rows(corpus)
     if not rows:
         raise ValueError("corpus must not be empty")
     requested_limit = int(limit)
@@ -77,18 +91,26 @@ def compare_methods(A, B, corpus, encoder, limit=5, seed=0, corpus_path=None):
         raise ValueError("A and B must contain non-whitespace text")
 
     context = f"{used_a}、{used_b}"
+    space = shared_geometry_space(used_a, used_b, rows, encoder)
     ranked = {}
     for name in METHOD_NAMES[:4]:
         result = run(context, rows, name, limit=requested_limit, encoder=encoder)
         ranked[name] = result["selected"]
     for name in METHOD_NAMES[4:]:
-        ranked[name] = rank_entries(used_a, used_b, rows, encoder, name, requested_limit)
+        ranked[name] = rank_entries(
+            used_a,
+            used_b,
+            rows,
+            encoder,
+            name,
+            requested_limit,
+            space=space,
+            exclusion_inputs=(A, B),
+        )
 
-    entry_texts = [f"{a}と{b}。{line}" for a, b, line in rows]
-    query_vectors = encoder.encode_query([used_a, used_b])
-    passage_vectors = encoder.encode_passage(entry_texts)
-    mu = np.mean(np.vstack([query_vectors, passage_vectors]), axis=0)
-    common_metrics = geometry(query_vectors[0], query_vectors[1], passage_vectors, mu=mu)
+    common_metrics = geometry(
+        space["a_vector"], space["b_vector"], space["passage_vectors"], mu=space["mu"]
+    )
 
     methods = {}
     selected_sets = {}
@@ -97,12 +119,7 @@ def compare_methods(A, B, corpus, encoder, limit=5, seed=0, corpus_path=None):
         selected_sets[name] = set(indices)
         methods[name] = {
             "selected": [
-                {
-                    "corpus_index": index,
-                    "a": rows[index][0],
-                    "b": rows[index][1],
-                    "metrics": _public_metrics(common_metrics[index]),
-                }
+                _selected_entry(name, index, rows, common_metrics, A, B)
                 for index in indices
             ],
             "means": _mean_metrics(indices, common_metrics),
@@ -115,6 +132,7 @@ def compare_methods(A, B, corpus, encoder, limit=5, seed=0, corpus_path=None):
     return {
         "input": {"A": A, "B": B},
         "input_normalization": {
+            "rule": r"[、,，/／\s]+ -> _",
             "A": {"original": A, "used": used_a},
             "B": {"original": B, "used": used_b},
         },
@@ -169,7 +187,7 @@ def render_markdown(result):
 
 def write_blind_materials(result, corpus, sheet_dir):
     """Write a method-blind human evaluation sheet and its private key."""
-    rows = [tuple(row) for row in corpus]
+    rows = _rows(corpus)
     methods_by_index = {}
     for name in METHOD_NAMES:
         for selected in result["methods"][name]["selected"]:
@@ -183,6 +201,9 @@ def write_blind_materials(result, corpus, sheet_dir):
     key_path = output_dir / "blind_key.json"
     sheet_lines = [
         "# Blind human evaluation sheet",
+        "",
+        f"- Input A: `{result['input']['A']}`",
+        f"- Input B: `{result['input']['B']}`",
         "",
         "人手評価は未実施です。各観点を 1–5 で記入してください。",
         "",

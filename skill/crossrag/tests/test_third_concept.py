@@ -164,6 +164,9 @@ class ExplorationContractTest(unittest.TestCase):
             {
                 "A": [1, 0, 0],
                 "B": [0, 1, 0],
+                "safe-a": [0, 0, 1],
+                "safe-b": [1, 1, 0],
+                "other": [0, 1, 1],
                 texts[0]: [0.99, 0.01, 0],
                 texts[1]: [0, 0, 1],
             }
