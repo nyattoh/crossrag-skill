@@ -1,0 +1,111 @@
+{
+  "input": {
+    "A": "入眠障害",
+    "B": "条件反射"
+  },
+  "generator": {
+    "provider": "claudeAgent",
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "prompt_sha256": "8e5ce3d74c1b5d48208056e0852865a9c38123265bcd6464579d8dd28038dda3",
+    "date": "2026-10-18"
+  },
+  "hypotheses": [
+    {
+      "concept": "就床前ルーティンの条件刺激化",
+      "kind": "llm_hypothesis",
+      "explanation": "入眠障害の人が毎晩同一の短い感覚刺激列(特定の香り・音・照明)を就床直前に提示し、その直後の入眠を繰り返すと、刺激列が入眠の条件刺激となり、入眠潜時が短縮するという仮説。ポイントは「眠れた直後」にのみ刺激を対提示することで、眠れない夜は刺激を省く点。",
+      "relation_to_A_alone": "入眠障害単独では原因や対処の列挙に向かい、対提示の設計には向かわない。",
+      "relation_to_B_alone": "条件反射単独ではパブロフの犬の例にとどまる。",
+      "why_requires_AB": "入眠潜時という特定の無条件反応(眠気)を条件付けする設計は、入眠障害の症状と古典的条件づけの結合から生まれる。",
+      "uncertainty": "眠気が無条件刺激として働くかは不明。眠れた夜のみ対提示すると標本が偏る。",
+      "falsification_or_check": "ランダム化比較で、対提示群と非対提示群の入眠潜時(睡眠日誌または活動量計)を4週間比較。差が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 3,
+        "emergence": 4,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "寝床=覚醒の逆条件づけ",
+      "kind": "llm_hypothesis",
+      "explanation": "入眠障害で寝床に居続けると、寝床自体が覚醒・不安の条件刺激になる(逆条件づけ)ため、眠くなるまで寝床を離れる刺激制御法は、条件の消去として説明できるという仮説。消去の進行を寝床内覚醒時間で測る。",
+      "relation_to_A_alone": "入眠障害単独では寝室環境の改善に向かう。",
+      "relation_to_B_alone": "条件反射単独では消去という用語の一般的説明に向かう。",
+      "why_requires_AB": "寝床と覚醒の誤った対提示が症状を維持するという因果は、AとBを結合した場合の機構として読める。",
+      "uncertainty": "既存の刺激制御法と実質的に重なり、新規性は低い可能性がある。",
+      "falsification_or_check": "寝床内覚醒時間を日誌で記録し、寝床離脱ルールの有無で比較。差がなければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 2,
+        "coherence": 5,
+        "emergence": 2,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "生体指標ゲート式の入眠合図",
+      "kind": "llm_hypothesis",
+      "explanation": "心拍変動(HRV)が閾値を超えた時のみ合図刺激を提示するクローズドループ式装置により、「副交感優位な状態」と「合図」が選択的に対提示され、条件付けの効率が上がるという仮説。",
+      "relation_to_A_alone": "入眠障害単独では装置による生体指標管理は連想されにくい。",
+      "relation_to_B_alone": "条件反射単独では対提示のタイミングは実験者が決めるのが一般的。",
+      "why_requires_AB": "対提示の条件を本人の生理状態で決めることは、入眠の生理状態(A)と条件づけの設計(B)の結合で現れる。",
+      "uncertainty": "HRVが入眠と因果的に結びつくかは不明で、装置の精度も課題。",
+      "falsification_or_check": "HRVゲートあり群・なし群の入眠潜時を比較。差が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 4,
+        "coherence": 3,
+        "emergence": 4,
+        "testability": 4
+      }
+    },
+    {
+      "concept": "入眠努力の条件刺激化",
+      "kind": "llm_hypothesis",
+      "explanation": "眠れない経験が繰り返されると、「眠ろう」とする意図そのものが覚醒を誘発する条件刺激となり、努力するほど眠れなくなる逆説的入眠努力が生じるという仮説。意図の強さを操作すると潜時が変わるはず。",
+      "relation_to_A_alone": "入眠障害単独では不安や緊張が連想される。",
+      "relation_to_B_alone": "条件反射単独では意図が刺激になる例は連想しにくい。",
+      "why_requires_AB": "眠ろうとする意図(A)が条件刺激として機能するという解釈は、AをBの枠組みで読んで初めて出る。",
+      "uncertainty": "意図が測定可能な変数として操作できるかは不明。",
+      "falsification_or_check": "「眠らなくてよい」教示(逆説志向)群と通常群の入眠潜時を比較。差が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 4,
+        "emergence": 3,
+        "testability": 4
+      }
+    },
+    {
+      "concept": "記憶再活性化型の入眠合図",
+      "kind": "idea",
+      "explanation": "日中に学習した内容に紐づけた音を、入眠後に再提示する標的記憶再活性化(TMR)の手法を応用し、入眠困難者向けの「入眠合図」として使う案。",
+      "relation_to_A_alone": "入眠障害単独では記憶との関連は連想されない。",
+      "relation_to_B_alone": "条件反射は記憶の合図と連想されうる。",
+      "why_requires_AB": "入眠困難者に合図を与えるという用途は両者の組合せで生まれる。",
+      "uncertainty": "TMRは入眠後に提示するため、入眠前の合図としては機構が異なる。",
+      "falsification_or_check": "TMR群・対照群の入眠潜時と記憶保持を比較。入眠潜時に差が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 2,
+        "emergence": 3,
+        "testability": 3
+      }
+    },
+    {
+      "concept": "夜間覚醒時の部分強化",
+      "kind": "idea",
+      "explanation": "夜間覚醒時に携帯画面などを見ると、条件刺激(寝床)が覚醒と再び対提示され、消去が部分強化となってかえって維持されるという着想。",
+      "relation_to_A_alone": "入眠障害単独では夜間覚醒対策に向かう。",
+      "relation_to_B_alone": "条件反射単独では部分強化に消去抵抗があるという一般知識に向かう。",
+      "why_requires_AB": "部分強化の消去抵抗を寝床=覚醒の関係に当てはめる発想は両者の結合から出る。",
+      "uncertainty": "夜間覚醒の頻度分布と画面使用の因果関係は不明。",
+      "falsification_or_check": "夜間覚醒時の画面使用の有無で入眠障害の持続を縦断的に追跡。関連が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 3,
+        "emergence": 3,
+        "testability": 3
+      }
+    }
+  ]
+}

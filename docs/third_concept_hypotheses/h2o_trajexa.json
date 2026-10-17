@@ -1,0 +1,95 @@
+{
+  "input": {
+    "A": "H2O MEMORY",
+    "B": "TRAJEXA"
+  },
+  "generator": {
+    "provider": "claudeAgent",
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "prompt_sha256": "11a07a7aa0d81b2a9692bf5aeec28c9cea4dddc5fe0abc53daf9ae96c9ef6b25",
+    "date": "2026-10-18"
+  },
+  "hypotheses": [
+    {
+      "concept": "遷移ログの忘却可能な正本化",
+      "kind": "llm_hypothesis",
+      "explanation": "TRAJEXAの回答・遷移列を、H2O Memoryの「観測と解釈の分離」と追記型の訂正/削除イベントで管理し、各結果(軌跡マップや気づき)を正本から常に再生成可能な派生表示にする仕組み。利用者が撤回した回答が派生表示に残らないことをテストできる。",
+      "relation_to_A_alone": "TRAJEXAは軌跡を可視化する診断アプリとして理解されるが、記憶層の設計は含意されない。",
+      "relation_to_B_alone": "H2O Memoryは記憶の原則群として理解されるが、診断軌跡の扱いは含意されない。",
+      "why_requires_AB": "軌跡という個人データの撤回・同意変更が頻発する用途(A)と、その撤回を状態遷移として監査する記憶機構(B)の組合せで、削除再出現という具体的故障が定義される。",
+      "uncertainty": "私が把握した資料は用語集・方法論の抜粋のみで、実装の詳細は不明。両者の関係は推測。",
+      "falsification_or_check": "派生表示を一部キャッシュ化した状態で回答を削除し、削除済みの情報が結果画面に再出現するかをテストする。再出現が起きなければこの故障モードは棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 4,
+        "emergence": 4,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "由来ラベル付き気づきの再活性化",
+      "kind": "llm_hypothesis",
+      "explanation": "TRAJEXAの「気づき」を、利用者の発言・外部観測・AI推論の由来ラベルを付けて保存し、手掛かり駆動で必要な少数のみを再活性化させる。再訪時、AI推論由来の気づきを事実の位置に置かないことを保つ。",
+      "relation_to_A_alone": "TRAJEXAの気づきは本人が受け止め直せる見立てと定義されるが、由来の型付けは含意されない。",
+      "relation_to_B_alone": "H2O Memoryの由来分離は一般的な記憶原則に見える。",
+      "why_requires_AB": "気づきが仮説であること(A)と、AI推論を事実として保存しない原則(B)が重なると、再訪時の提示順序や強度の設計が具体化する。",
+      "uncertainty": "資料中の用語の対応を私が推測しているだけで、実際の設計と合致する保証はない。",
+      "falsification_or_check": "再訪画面で由来ラベルの有無を変えた場合に、利用者の『しっくりくる』評定が変わるかを比較する。変化が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 4,
+        "emergence": 3,
+        "testability": 4
+      }
+    },
+    {
+      "concept": "回答再訪の再活性化遅延プローブ",
+      "kind": "llm_hypothesis",
+      "explanation": "TRAJEXAで同一テーマに再回答する際、H2O Memoryの休眠・再活性化の概念を使い、前回回答を非表示にした場合と表示した場合で、回答の遷移(再訪か新規か)がどう変わるかを測る実験。",
+      "relation_to_A_alone": "TRAJEXAは軌跡を測るが、前回回答を見せるか否かの操作は含意されない。",
+      "relation_to_B_alone": "H2O Memoryは手掛かりによる再活性化を扱う。",
+      "why_requires_AB": "軌跡の再訪(A)に対して手掛かり提示の有無を操作する実験は、記憶機構(B)の考え方が入って初めて設計される。",
+      "uncertainty": "再訪の定義や類似度尺度の実装が不明。",
+      "falsification_or_check": "手掛かり表示群・非表示群に再回答させ、再訪率や進展率を比較。差が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 4,
+        "coherence": 3,
+        "emergence": 4,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "認識段階×保存温度の二軸マップ",
+      "kind": "idea",
+      "explanation": "TRAJEXAの結果を、認識段階(散在→集合→結晶化)と保存の温度(hot/warm/cold)の二軸にプロットし、結晶化しているのに保存が冷たい項目を「見直し候補」として示す案。",
+      "relation_to_A_alone": "TRAJEXAは軌跡の可視化に近い。",
+      "relation_to_B_alone": "H2O Memoryの二軸直交管理は記憶設計の語彙に近い。",
+      "why_requires_AB": "二軸を診断結果の俯瞰図に転用する発想は、両者の語彙を組合せて初めて浮かぶ。",
+      "uncertainty": "二軸の定義が診断データにそのまま対応するかは不明。",
+      "falsification_or_check": "既存のデータ数件で二軸に割り当てを試み、解釈が一貫するかを確認。一貫しなければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 2,
+        "emergence": 3,
+        "testability": 3
+      }
+    },
+    {
+      "concept": "負の結果の公開テンプレート",
+      "kind": "idea",
+      "explanation": "TRAJEXAの検証結果のうち、基準率に勝てなかった場合の測定も公開する枠組みを、H2O Memoryの「負の結果の公開」原則で標準化するという案。",
+      "relation_to_A_alone": "TRAJEXAは反証ゲートを備えるとされる。",
+      "relation_to_B_alone": "H2O Memoryは負の結果公開を原則とする。",
+      "why_requires_AB": "反証ゲートの出力を公開形式に落とす具体化は両者の接点で現れる。",
+      "uncertainty": "既に実施されているものと重複している可能性がある。",
+      "falsification_or_check": "現行の反証ゲート出力と原則の記述を突き合わせ、未対応の項目があるかを確認。無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 2,
+        "coherence": 4,
+        "emergence": 2,
+        "testability": 4
+      }
+    }
+  ]
+}

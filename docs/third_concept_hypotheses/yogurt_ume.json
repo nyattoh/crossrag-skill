@@ -1,0 +1,111 @@
+{
+  "input": {
+    "A": "ヨーグルト",
+    "B": "梅シロップ"
+  },
+  "generator": {
+    "provider": "claudeAgent",
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "prompt_sha256": "73023769a7c14c8f279f05383e33d5f31508dfeae4723caa85c3fc358e7f0bc6",
+    "date": "2026-10-18"
+  },
+  "hypotheses": [
+    {
+      "concept": "乳酸菌の浸透圧ショック耐性試験",
+      "kind": "llm_hypothesis",
+      "explanation": "梅シロップ(高糖・高浸透圧、梅由来の有機酸を含む)にヨーグルト由来乳酸菌を少量接種し、生残数の推移で菌株ごとの高浸透圧・低pH耐性を比べる簡易スクリーニングという仮説。糖濃度と酸が同時にかかる環境は、通常のMRS培地では再現しにくい。",
+      "relation_to_A_alone": "ヨーグルトだけでは菌の存在と発酵しか連想されず、高浸透圧耐性の試験系には結びつかない。",
+      "relation_to_B_alone": "梅シロップだけでは保存食・飲料で、菌の耐性試験とは結びつかない。",
+      "why_requires_AB": "高糖と有機酸の複合ストレス環境(B)に、実際の生菌集団(A)を置くことで初めて生残差という測定量が生じる。",
+      "uncertainty": "梅シロップの抗菌性成分が菌を一律に殺し、株間差が出ない可能性。抽出条件で結果が変わる。",
+      "falsification_or_check": "3株以上の市販ヨーグルト菌を同一梅シロップに接種し、0/6/24hのコロニー数を比較。株間差が測定誤差内なら棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 4,
+        "coherence": 3,
+        "emergence": 4,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "糖クリーム分離ゾーン",
+      "kind": "llm_hypothesis",
+      "explanation": "ヨーグルトの上に梅シロップを静置すると、高密度のシロップが沈み、酸でカゼインが局所的に凝集して、透明なシロップ層・半透明ゲル層・白色層の三層が時間とともに現れるという仮説。層厚の時間変化から界面の拡散速度を読む。",
+      "relation_to_A_alone": "ヨーグルトの乳清分離は連想されるが、外部酸糖液による層形成は連想されにくい。",
+      "relation_to_B_alone": "梅シロップの粘度や比重は連想されるが、タンパク質ゲルとの界面現象は連想されない。",
+      "why_requires_AB": "タンパク質ゲル(A)と高密度酸性糖液(B)の界面でのみ、浸透圧による脱水と酸凝集が同時に起こる。",
+      "uncertainty": "層が実際に分かれるか自体が未確認。混ぜ方・温度で消える可能性。",
+      "falsification_or_check": "透明容器に同量を静置し、1/6/24h後に層厚を写真計測。層が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 4,
+        "coherence": 3,
+        "emergence": 4,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "酸味マスキング味覚順応実験",
+      "kind": "llm_hypothesis",
+      "explanation": "ヨーグルトの乳酸酸味と梅シロップのクエン酸・リンゴ酸の酸味を順に提示すると、順応により二番目の酸味の強度評価が下がるか上がるかが提示順で変わる、という官能評価の設計。",
+      "relation_to_A_alone": "ヨーグルトの酸味単独では順応実験の対象になりにくい。",
+      "relation_to_B_alone": "梅シロップの酸味単独でも順応設計には至らない。",
+      "why_requires_AB": "異なる酸種(乳酸 vs クエン酸系)の交差順応の有無は、二つの酸味源を組合せて初めて測れる。",
+      "uncertainty": "被験者数が少ないと個人差に埋もれる。交差順応の有無の方向は不明。",
+      "falsification_or_check": "AB順とBA順を無作為化した官能評価(n≥20)で酸味強度の差を比較。差がなければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 4,
+        "emergence": 3,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "梅果実の再発酵種床",
+      "kind": "idea",
+      "explanation": "漬け終えた梅シロップの梅の実を、ヨーグルト乳清に漬けて二次発酵させ、保存性の違う副産物(乳酸梅)を作るという着想。",
+      "relation_to_A_alone": "ヨーグルトの乳清利用は一般的な発想。",
+      "relation_to_B_alone": "梅の実の再利用も一般的な発想。",
+      "why_requires_AB": "梅の実の糖と酸、乳清の菌を組合せることで二次発酵製品という概念が生まれる。",
+      "uncertainty": "安全性(腐敗・病原菌増殖)が未評価で、食用にできるかは不明。",
+      "falsification_or_check": "小スケールでpHと菌数の経時測定を行い、安全域(pH<4.2など)を満たさなければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 2,
+        "emergence": 3,
+        "testability": 3
+      }
+    },
+    {
+      "concept": "ペクチン・カゼイン共存ゲル粘度曲線",
+      "kind": "llm_hypothesis",
+      "explanation": "梅の実や梅シロップに由来するペクチン成分と、ヨーグルトのカゼインゲルが共存すると、pH域によっては混合ゲルの粘弾性が単独より高く(または低く)なるという仮説。",
+      "relation_to_A_alone": "ヨーグルト単独ではカゼインのみのゲルとして扱われる。",
+      "relation_to_B_alone": "梅シロップ単独ではペクチンの影響は小さく見える。",
+      "why_requires_AB": "ペクチンとカゼインの静電的相互作用はAとBのpH・組成が重なる領域でのみ生じうる。",
+      "uncertainty": "梅シロップのペクチン含有量は低く、効果が検出限界以下かもしれない。",
+      "falsification_or_check": "梅シロップ添加量を段階的に変え、レオメータまたは簡易流下時間で粘度を測定。用量依存性がなければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 3,
+        "coherence": 4,
+        "emergence": 4,
+        "testability": 5
+      }
+    },
+    {
+      "concept": "酸糖による発酵停止スイッチ",
+      "kind": "idea",
+      "explanation": "梅シロップの酸と糖で、ヨーグルトの発酵を一定の段階で止める「停止剤」として使う仕組み。添加量で酸度の到達点を調整する発想。",
+      "relation_to_A_alone": "ヨーグルトの発酵管理は温度と時間が中心。",
+      "relation_to_B_alone": "梅シロップは甘味・保存料として連想される。",
+      "why_requires_AB": "発酵の停止点を外部酸糖液で制御するという発想は両者の組合せでのみ現れる。",
+      "uncertainty": "実際には単なる酸の追加に過ぎず、新規性が乏しい可能性。",
+      "falsification_or_check": "添加量別にpH・菌数の推移を測り、単なる酸添加との差が無ければ棄却。",
+      "llm_self_assessment": {
+        "unexpectedness": 2,
+        "coherence": 3,
+        "emergence": 2,
+        "testability": 4
+      }
+    }
+  ]
+}
