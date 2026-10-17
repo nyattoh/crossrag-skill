@@ -29,3 +29,7 @@ python scripts/run.py --context '犬、カレー' --corpus references/example-co
 The script prints structured UTF-8 JSON with retrieved motifs, `cosine`, `orthogonal`, `wedge` and ranked scores. The LLM then generates the final artefact. Use `--corpus` to point to a user-supplied JSON collection of triples `["concept1", "concept2", "inspiration"]` or objects with `a`, `b`, `line`.
 
 Read `references/methodology.md` for formulae, limitations, and evaluation guidance. Read `references/modes.md` for output patterns.
+
+## third-concept (experimental)
+
+Use `python scripts/third_concept_cli.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --encoder hash --limit 5 --seed 0` to rank a supplied candidate pool. Use `--emit-prompt` (optionally `--with-math`) to prepare an external hypothesis prompt, then import the resulting file with `--hypotheses path/to/hypotheses.json`. Compare `similar`, `orthogonal`, `wedge`, `random`, `third-concept`, `mean`, and `third-concept-no-wedge` with `python scripts/compare_third_concept.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --format markdown`. Preserve every output candidate's `origin` label (`retrieved`, `math`, `llm_hypothesis`, or `idea`); all outputs remain unverified and must not be presented as facts, proofs, or discoveries.

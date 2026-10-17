@@ -174,3 +174,60 @@ Exit code: `0`
 Ran 26 tests in 2.315s
 OK
 ```
+
+## T4 hypothesis runs
+
+Working directory for all commands below: `skill/crossrag`.
+
+Corpus: `D:\develop\works\crossrag\crossrag_past_engineering_corpus.json` (`corpus_id=26636196c50a5d08`, 51 items).
+
+### Commands and exit codes
+
+| Command | Exit | Output |
+|---|---:|---|
+| `python scripts/third_concept_cli.py --A 'ヨーグルト' --B '梅シロップ' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder hash --limit 5 --seed 0 --hypotheses '..\..\docs\third_concept_hypotheses\yogurt_ume.json'` | 0 | `D:\inbox\crossrag-third-concept\t4\yogurt_ume_hash_hyp.json` |
+| `$env:HF_HUB_OFFLINE='1'; python scripts/third_concept_cli.py --A 'ヨーグルト' --B '梅シロップ' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder semantic --model 'intfloat/multilingual-e5-small' --limit 5 --seed 0 --hypotheses '..\..\docs\third_concept_hypotheses\yogurt_ume.json'` | 0 | `D:\inbox\crossrag-third-concept\t4\yogurt_ume_semantic_hyp.json` |
+| `python scripts/third_concept_cli.py --A '入眠障害' --B '条件反射' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder hash --limit 5 --seed 0 --hypotheses '..\..\docs\third_concept_hypotheses\insomnia_conditioning.json'` | 0 | `D:\inbox\crossrag-third-concept\t4\insomnia_conditioning_hash_hyp.json` |
+| `$env:HF_HUB_OFFLINE='1'; python scripts/third_concept_cli.py --A '入眠障害' --B '条件反射' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder semantic --model 'intfloat/multilingual-e5-small' --limit 5 --seed 0 --hypotheses '..\..\docs\third_concept_hypotheses\insomnia_conditioning.json'` | 0 | `D:\inbox\crossrag-third-concept\t4\insomnia_conditioning_semantic_hyp.json` |
+| `python scripts/third_concept_cli.py --A 'H2O MEMORY' --B 'TRAJEXA' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder hash --limit 5 --seed 0 --hypotheses '..\..\docs\third_concept_hypotheses\h2o_trajexa.json'` | 0 | `D:\inbox\crossrag-third-concept\t4\h2o_trajexa_hash_hyp.json` |
+| `$env:HF_HUB_OFFLINE='1'; python scripts/third_concept_cli.py --A 'H2O MEMORY' --B 'TRAJEXA' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder semantic --model 'intfloat/multilingual-e5-small' --limit 5 --seed 0 --hypotheses '..\..\docs\third_concept_hypotheses\h2o_trajexa.json'` | 0 | `D:\inbox\crossrag-third-concept\t4\h2o_trajexa_semantic_hyp.json` |
+| `python scripts/third_concept_cli.py --A 'ヨーグルト' --B '梅シロップ' --emit-prompt` | 0 | `D:\inbox\crossrag-third-concept\t4\yogurt_ume_prompt.txt` |
+| `python scripts/third_concept_cli.py --A 'ヨーグルト' --B '梅シロップ' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder hash --limit 5 --seed 0 --emit-prompt --with-math` | 0 | `D:\inbox\crossrag-third-concept\t4\yogurt_ume_prompt_with_math.txt` |
+| `python scripts/third_concept_cli.py --A '入眠障害' --B '条件反射' --emit-prompt` | 0 | `D:\inbox\crossrag-third-concept\t4\insomnia_conditioning_prompt.txt` |
+| `python scripts/third_concept_cli.py --A '入眠障害' --B '条件反射' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder hash --limit 5 --seed 0 --emit-prompt --with-math` | 0 | `D:\inbox\crossrag-third-concept\t4\insomnia_conditioning_prompt_with_math.txt` |
+| `python scripts/third_concept_cli.py --A 'H2O MEMORY' --B 'TRAJEXA' --emit-prompt` | 0 | `D:\inbox\crossrag-third-concept\t4\h2o_trajexa_prompt.txt` |
+| `python scripts/third_concept_cli.py --A 'H2O MEMORY' --B 'TRAJEXA' --corpus 'D:\develop\works\crossrag\crossrag_past_engineering_corpus.json' --encoder hash --limit 5 --seed 0 --emit-prompt --with-math` | 0 | `D:\inbox\crossrag-third-concept\t4\h2o_trajexa_prompt_with_math.txt` |
+
+The three semantic runs used only the local model cache. Each emitted an `embeddings.position_ids | UNEXPECTED` load report and still exited `0`. All six hypothesis JSON files parsed, reported `corpus_size=51` and `corpus_id=26636196c50a5d08`, and emitted no geometry warning.
+
+### SHA-256
+
+| Output | SHA-256 |
+|---|---|
+| `h2o_trajexa_hash_hyp.json` | `dda8cca32ea44ac3fce4cdd30af9f83e9fe326a9a7d16bf59c28e9e3f70bbdeb` |
+| `h2o_trajexa_prompt_with_math.txt` | `7d980f632be12100f94c901f8b2cbeaca8352ebd8597cde1c1b1ac9dd46e812c` |
+| `h2o_trajexa_prompt.txt` | `e25a070aadf5315521d74cca8f01cc68aa5324e4f1a45262cf81cd3969da6612` |
+| `h2o_trajexa_semantic_hyp.json` | `574dbf7d0deeb883ab9ddc7d76e8e9fd1f3dafefbe437c922afc44c0594834ea` |
+| `insomnia_conditioning_hash_hyp.json` | `59a2dd944c1f094be25ad8b947699d46471623c69e7f3c68c498c59f0f53ad04` |
+| `insomnia_conditioning_prompt_with_math.txt` | `b0dcdb49c832b44c42bd8866c7f5c8d67ec67b3458022f4fa6c263b05aa7a5de` |
+| `insomnia_conditioning_prompt.txt` | `d387b30e50ed43dc92be2b4c86c7a3b3a5a2bde147c7f7738d476b06118a80a7` |
+| `insomnia_conditioning_semantic_hyp.json` | `05e02679b2992b420f92174fd0e3f9c2770c8fd006cb6bcd84e32b21240706d0` |
+| `yogurt_ume_hash_hyp.json` | `a8e12ac4cd7b98eef6b6b934a1ece39ab5f18c9cc6388367edec306fddc30f36` |
+| `yogurt_ume_prompt_with_math.txt` | `781f7843637a388ec0bd28de3975e2db16aff29e05644c46107b349ca25caaff` |
+| `yogurt_ume_prompt.txt` | `6600f15ee08fa4e80f3370f163228f4f9660069c016f36c58070165e84b093a9` |
+| `yogurt_ume_semantic_hyp.json` | `bc26cdee460de9cdff50175496e08bd09161bc8b0afbfaafdc267b99d8e29957` |
+
+### Full regression
+
+Command:
+
+```text
+python -m unittest discover -s tests -v
+```
+
+Exit code: `0`
+
+```text
+Ran 26 tests in 2.156s
+OK
+```
