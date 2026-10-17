@@ -8,7 +8,6 @@ import math
 import random
 import re
 import sys
-import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +15,8 @@ import numpy as np
 from engine import DEFAULT_CORPUS, normalise, run
 from third_concept import (
     _contains_input,
+    _normalised_exclude_terms,
+    _normalised_text,
     _rows,
     auto_p_min,
     corpus_id,
@@ -81,22 +82,6 @@ DISCLAIMER = "全指標は探索用ヒューリスティックであり、人手
 
 def _normalise_input(text):
     return re.sub(r"[、,，/／\s]+", "_", text.strip()).strip("_")
-
-
-def _normalised_text(text):
-    return "".join(unicodedata.normalize("NFKC", text).casefold().split())
-
-
-def _exclude_terms(exclude):
-    terms = []
-    for term in exclude:
-        if not isinstance(term, str) or not term.strip():
-            raise ValueError("exclude terms must be non-empty strings")
-        value = _normalised_text(term)
-        if not value:
-            raise ValueError("exclude terms must be non-empty strings")
-        terms.append(value)
-    return terms
 
 
 def _public_metrics(metrics):
@@ -288,7 +273,7 @@ def _null_evaluation(null, p_min, common_metrics, selected_indices, eligible, sa
     }
 
 
-def compare_methods(
+def _compare(
     A,
     B,
     corpus,
@@ -303,6 +288,7 @@ def compare_methods(
     null_samples=1000,
     extra_query_texts=(),
     excluded=None,
+    space=None,
 ):
     """Run legacy and third-concept methods in one shared representation."""
     rows = _rows(corpus)
@@ -315,7 +301,7 @@ def compare_methods(
         raise ValueError("input_kind must be 'word' or 'sentence'")
     if type(null_samples) is not int or null_samples < 1:
         raise ValueError("null_samples must be an integer at least 1")
-    terms = _exclude_terms(exclude)
+    terms = _normalised_exclude_terms(exclude)
     used_a = _normalise_input(A)
     used_b = _normalise_input(B)
     if not used_a or not used_b:
@@ -326,7 +312,11 @@ def compare_methods(
     method_names = PLAIN_METHOD_NAMES if plain else METHOD_NAMES
 
     canonical_corpus = _canonical_corpus(rows)
-    space = shared_geometry_space(geometry_a, geometry_b, canonical_corpus, encoder, vocab=list(extra_query_texts))
+    if space is None:
+        space = shared_geometry_space(
+            geometry_a, geometry_b, canonical_corpus, encoder,
+            vocab=list(extra_query_texts),
+        )
     if excluded is None:
         excluded_mask = exclusion_mask(space, A, B, exclude)
     else:
@@ -415,7 +405,7 @@ def compare_methods(
     }
     if input_kind == "sentence" or plain:
         input_normalization["applies_to"] = "engine-baselines-only" if input_kind == "sentence" else "all-methods"
-    return {
+    result = {
         "input": {"A": A, "B": B},
         "input_normalization": input_normalization,
         "encoder": {"name": encoder.name, "model_id": encoder.model_id, "prefix": encoder.prefix},
@@ -446,6 +436,33 @@ def compare_methods(
             "notes": evaluation_notes,
         },
     }
+    return result, space, common_metrics
+
+
+def compare_methods(
+    A,
+    B,
+    corpus,
+    encoder,
+    limit=5,
+    seed=0,
+    corpus_path=None,
+    *,
+    input_kind="word",
+    exclude=(),
+    p_min=None,
+    null_samples=1000,
+    extra_query_texts=(),
+    excluded=None,
+):
+    """Run legacy and third-concept methods in one shared representation."""
+    result, _, _ = _compare(
+        A, B, corpus, encoder, limit, seed, corpus_path,
+        input_kind=input_kind, exclude=exclude, p_min=p_min,
+        null_samples=null_samples, extra_query_texts=extra_query_texts,
+        excluded=excluded,
+    )
+    return result
 
 
 def _result_indices(result, method):
@@ -457,31 +474,26 @@ def compare_pair(word_pair, sentence_pair, corpus, encoder, limit, seed, corpus_
     word_a, word_b = word_pair
     sentence_a, sentence_b = sentence_pair
     rows = _rows(corpus)
-    word_used = (_normalise_input(word_a), _normalise_input(word_b))
+    word_q = (_normalise_input(word_a), _normalise_input(word_b))
+    sent_q = (sentence_a.strip(), sentence_b.strip())
+    if not all((*word_q, *sent_q)):
+        raise ValueError("A and B must contain non-whitespace text")
     canonical_corpus = _canonical_corpus(rows)
-    word_space = shared_geometry_space(*word_used, canonical_corpus, encoder, vocab=[sentence_a.strip(), sentence_b.strip()])
-    sentence_space = shared_geometry_space(sentence_a.strip(), sentence_b.strip(), canonical_corpus, encoder, vocab=[*word_pair])
+    word_space = shared_geometry_space(*word_q, canonical_corpus, encoder, vocab=list(sent_q))
+    sentence_space = shared_geometry_space(*sent_q, canonical_corpus, encoder, vocab=list(word_q))
     word_mask = exclusion_mask(word_space, word_a, word_b, exclude)
     sentence_mask = exclusion_mask(sentence_space, sentence_a, sentence_b, exclude)
     common_excluded = [left or right for left, right in zip(word_mask, sentence_mask)]
-    word = compare_methods(
+    word, _, word_metrics = _compare(
         word_a, word_b, canonical_corpus, encoder, limit, seed, corpus_path, input_kind="word", exclude=exclude,
-        p_min=p_min, null_samples=null_samples, extra_query_texts=sentence_pair, excluded=common_excluded,
+        p_min=p_min, null_samples=null_samples, excluded=common_excluded, space=word_space,
     )
-    sentence = compare_methods(
+    sentence, _, sentence_metrics = _compare(
         sentence_a, sentence_b, canonical_corpus, encoder, limit, seed, corpus_path, input_kind="sentence", exclude=exclude,
-        p_min=p_min, null_samples=null_samples, extra_query_texts=word_pair, excluded=common_excluded,
+        p_min=p_min, null_samples=null_samples, excluded=common_excluded, space=sentence_space,
     )
     method_names = (*word["methods"], RATIO_METHOD)
     eligible = [index for index, value in enumerate(common_excluded) if not value]
-    word_metrics = geometry(
-        word_space["a_vector"], word_space["b_vector"], word_space["passage_vectors"],
-        mu=word_space["mu"], p_min=word["evaluation"]["params"]["p_min"],
-    )
-    sentence_metrics = geometry(
-        sentence_space["a_vector"], sentence_space["b_vector"], sentence_space["passage_vectors"],
-        mu=sentence_space["mu"], p_min=sentence["evaluation"]["params"]["p_min"],
-    )
     family_scores = {
         "third-concept": "score_third",
         RATIO_METHOD: "score_ratio",
@@ -515,7 +527,7 @@ def compare_pair(word_pair, sentence_pair, corpus, encoder, limit, seed, corpus_
                 "seed": int(seed),
                 "exclude": list(exclude),
                 "null_samples": null_samples,
-                "mu_query_texts": [word_a, word_b, sentence_a, sentence_b],
+                "mu_query_texts": [*word_q, *sent_q],
                 "p_min": {
                     "word": word["evaluation"]["params"]["p_min"],
                     "sentence": sentence["evaluation"]["params"]["p_min"],
@@ -644,6 +656,8 @@ def main():
     args = parser.parse_args()
     if (args.A_sentence is None) != (args.B_sentence is None):
         parser.error("--A-sentence and --B-sentence must be supplied together")
+    if args.A_sentence is not None and args.sheet_dir:
+        parser.error("--sheet-dir cannot be used with --A-sentence/--B-sentence")
     if args.aggregate_only and args.format == "markdown":
         parser.error("--aggregate-only is available only with --format json")
     try:

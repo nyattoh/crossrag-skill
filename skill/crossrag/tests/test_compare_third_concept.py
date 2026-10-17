@@ -369,6 +369,78 @@ class ComparisonV3Test(unittest.TestCase):
         self.assertEqual(set(result["paired"]["per_method"]), expected_methods)
         self.assertEqual(result["word"]["evaluation"]["eligible_count"], result["sentence"]["evaluation"]["eligible_count"])
 
+    def test_compare_pair_canonicalises_all_mu_query_texts_once(self):
+        compare_pair = getattr(comparison, "compare_pair")
+        captured = []
+        original = comparison.shared_geometry_space
+
+        def recording_space(*args, **kwargs):
+            space = original(*args, **kwargs)
+            captured.append(space)
+            return space
+
+        with mock.patch.object(comparison, "shared_geometry_space", side_effect=recording_space):
+            result = compare_pair(
+                ("H2O MEMORY", "TRAJEXA"),
+                (" 湯気が窓を曇らせる ", " 眠る前に灯りを消す "),
+                self.corpus, make_encoder("hash"), 2, 5, self.corpus_path, [], 0.0, 8,
+            )
+
+        self.assertEqual(len(captured), 2)
+        self.assertTrue(np.allclose(captured[0]["mu"], captured[1]["mu"]))
+        self.assertEqual(
+            result["paired"]["shared_conditions"]["mu_query_texts"],
+            ["H2O_MEMORY", "TRAJEXA", "湯気が窓を曇らせる", "眠る前に灯りを消す"],
+        )
+
+    def test_compare_pair_tau_uses_the_run_spaces_and_metrics(self):
+        compare_pair = getattr(comparison, "compare_pair")
+        captured = []
+        original = comparison.shared_geometry_space
+
+        def recording_space(*args, **kwargs):
+            space = original(*args, **kwargs)
+            captured.append(space)
+            return space
+
+        with mock.patch.object(comparison, "shared_geometry_space", side_effect=recording_space):
+            result = compare_pair(
+                ("H2O MEMORY", "TRAJEXA"),
+                (" 湯気が窓を曇らせる ", " 眠る前に灯りを消す "),
+                self.corpus, make_encoder("hash"), 2, 5, self.corpus_path, [], 0.0, 8,
+            )
+
+        self.assertEqual(len(captured), 2)
+        eligible = range(len(self.corpus))
+        metrics = [
+            comparison.geometry(
+                space["a_vector"], space["b_vector"], space["passage_vectors"],
+                mu=space["mu"], p_min=0.0,
+            )
+            for space in captured
+        ]
+        expected = comparison.kendall_tau_b(
+            [metrics[0][index]["score_third"] for index in eligible],
+            [metrics[1][index]["score_third"] for index in eligible],
+        )
+        self.assertEqual(
+            result["paired"]["per_method"]["third-concept"]["kendall_tau_b"],
+            comparison._round_optional(expected),
+        )
+
+    def test_paired_cli_rejects_sheet_dir(self):
+        completed = subprocess.run(
+            [
+                sys.executable, str(SCRIPTS / "compare_third_concept.py"),
+                "--A", "H2O MEMORY", "--B", "TRAJEXA",
+                "--A-sentence", "steam sentence", "--B-sentence", "sleep sentence",
+                "--corpus", str(self.corpus_path), "--sheet-dir", "unused",
+            ],
+            cwd=ROOT, capture_output=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("--sheet-dir", completed.stderr.decode("utf-8", errors="replace"))
+
     def test_aggregate_only_cli_removes_all_corpus_markers(self):
         pair = [
             {"a": "ZQX-A-01", "b": "ZQX-B-01", "line": "ZQX-LINE-01"},
