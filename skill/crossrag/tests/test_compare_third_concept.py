@@ -8,6 +8,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -22,6 +25,38 @@ from compare_third_concept import (  # noqa: E402
     compare_methods,
     write_blind_materials,
 )
+import compare_third_concept as comparison  # noqa: E402
+
+
+class RecordingModel:
+    def __init__(self):
+        self.calls = []
+
+    def encode(self, texts, normalize_embeddings, show_progress_bar):
+        self.calls.append(list(texts))
+        rows = []
+        for text in texts:
+            raw = np.array([len(text), sum(map(ord, text)) % 17 + 1, text.count(":") + 1], dtype=float)
+            rows.append(raw / np.linalg.norm(raw))
+        return np.asarray(rows)
+
+
+class FixedEncoder:
+    name = "fixed"
+    model_id = "fixed"
+    prefix = None
+
+    def __init__(self, vectors):
+        self.vectors = {key: np.asarray(value, dtype=float) for key, value in vectors.items()}
+
+    def encode_query(self, texts):
+        return np.asarray([self.vectors[text] for text in texts])
+
+    def encode_passage(self, texts):
+        return np.asarray([self.vectors[text] for text in texts])
+
+    def encode(self, texts):
+        return self.encode_query(texts)
 
 
 class CompareThirdConceptTest(unittest.TestCase):
@@ -199,6 +234,173 @@ class CompareThirdConceptTest(unittest.TestCase):
         completed = subprocess.run(command, cwd=ROOT, capture_output=True, env=env, check=True)
         output = json.loads(completed.stdout.decode("utf-8"))
         self.assertEqual(output["input"], {"A": "湯気", "B": "睡眠"})
+
+
+class ComparisonV3Test(unittest.TestCase):
+    def setUp(self):
+        self.corpus_path = FIXTURES / "synthetic_corpus.json"
+        self.corpus = load_corpus(self.corpus_path)
+
+    def test_evaluation_schema_preserves_legacy_top_level_contract(self):
+        result = compare_methods(
+            "H2O MEMORY", "TRAJEXA", self.corpus, make_encoder("hash"),
+            limit=3, seed=7, corpus_path=self.corpus_path, null_samples=12,
+        )
+        self.assertEqual(tuple(result["methods"]), METHOD_NAMES)
+        self.assertEqual(result["params"], {"limit": 3, "seed": 7})
+        self.assertIn("evaluation", result)
+        evaluation = result["evaluation"]
+        self.assertEqual(
+            set(evaluation),
+            {"params", "baseline_source", "methods", "ratio_means", "jaccard", "wedge_ablation", "null", "excluded_count", "eligible_count", "notes"},
+        )
+        self.assertEqual(set(evaluation["methods"]), {"third-concept-ratio"})
+        self.assertEqual(set(evaluation["methods"]["third-concept-ratio"]["means"]), set(comparison.METRIC_NAMES))
+        self.assertEqual(set(evaluation["jaccard"]), set(METHOD_NAMES) | {"third-concept-ratio"})
+        json.dumps(result, ensure_ascii=False, allow_nan=False)
+
+    def test_stats_helpers_cover_ties_bounds_and_undefined_cases(self):
+        kendall_tau_b = getattr(comparison, "kendall_tau_b")
+        midrank_percentile = getattr(comparison, "midrank_percentile")
+        self.assertEqual(kendall_tau_b([1, 2, 3], [1, 2, 3]), 1.0)
+        self.assertEqual(kendall_tau_b([1, 2, 3], [3, 2, 1]), -1.0)
+        # P=2, Q=0, T_x=1, T_y=0, so tau_b = 2 / sqrt((2+0)*(2+1)).
+        self.assertAlmostEqual(kendall_tau_b([1, 1, 2], [1, 2, 3]), 2 / np.sqrt(6))
+        self.assertIsNone(kendall_tau_b([1, 1, 1], [1, 2, 3]))
+        self.assertIsNone(kendall_tau_b([1], [1]))
+        self.assertEqual(midrank_percentile([2, 2, 2], 2), 50.0)
+        self.assertEqual(midrank_percentile([2, 2, 2], 3), 100.0)
+        self.assertEqual(midrank_percentile([2, 2, 2], 1), 0.0)
+
+    def _ablation_result(self, candidates):
+        A = [1.0, 0.0, 0.0]
+        B = [0.0, 1.0, 0.0]
+        compensation = -np.sum(np.asarray([A, B, *candidates]), axis=0)
+        lines = [f"node-{index}" for index in range(len(candidates))] + ["counter-vector"]
+        vectors = {"left-anchor": A, "right-anchor": B, **dict(zip(lines, [*candidates, compensation]))}
+        return compare_methods(
+            "left-anchor", "right-anchor", lines, FixedEncoder(vectors), limit=1, seed=3,
+            p_min=0.0, null_samples=8,
+        )
+
+    def test_wedge_ratio_ablation_can_differ_from_balance(self):
+        result = self._ablation_result([
+            [0.141421, 0.141421, 0.979796],
+            [0.7, 0.1, 0.707107],
+        ])
+        self.assertFalse(result["evaluation"]["wedge_ablation"]["third-concept-ratio"]["topk_identical_to_balance"])
+
+    def test_wedge_ratio_ablation_can_match_balance(self):
+        result = self._ablation_result([
+            [0.5, 0.5, 0.707107],
+            [0.141421, 0.141421, 0.979796],
+        ])
+        self.assertTrue(result["evaluation"]["wedge_ablation"]["third-concept-ratio"]["topk_identical_to_balance"])
+
+    def test_plain_text_corpora_work_in_api_and_cli(self):
+        plain = ["PLAIN-LINE-01", {"line": "PLAIN-LINE-02"}, "PLAIN-LINE-03"]
+        result = compare_methods("steam", "sleep", plain, make_encoder("hash"), limit=2, null_samples=8)
+        self.assertEqual(tuple(result["methods"]), ("similar", "random", "third-concept", "mean", "third-concept-no-wedge"))
+        self.assertEqual(result["evaluation"]["baseline_source"], "shared-space")
+        self.assertNotIn("orthogonal", result["methods"])
+        self.assertTrue(any("orthogonal" in note and "wedge" in note for note in result["evaluation"]["notes"]))
+        for method in result["methods"].values():
+            self.assertEqual(set(method["selected"][0]), {"corpus_index", "line", "metrics", "contains_input"})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plain.json"
+            path.write_text(json.dumps(plain), encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPTS / "compare_third_concept.py"), "--A", "steam", "--B", "sleep", "--corpus", str(path), "--encoder", "hash", "--limit", "2", "--null-samples", "8"],
+                cwd=ROOT, capture_output=True, check=False,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
+        self.assertEqual(json.loads(completed.stdout.decode("utf-8"))["evaluation"]["baseline_source"], "shared-space")
+
+    def test_sentence_input_keeps_original_for_geometry_and_normalises_baselines(self):
+        model = RecordingModel()
+        encoder = make_encoder("semantic", "intfloat/multilingual-e5-small", model=model)
+        result = compare_methods(
+            "first sentence / original", "second sentence original", self.corpus[:3], encoder,
+            limit=2, input_kind="sentence", p_min=0.0, null_samples=6,
+        )
+        flattened = [text for call in model.calls for text in call]
+        self.assertIn("query: first sentence / original", flattened)
+        self.assertIn("query: second sentence original", flattened)
+        self.assertTrue(any("first_sentence_original" in text for text in flattened))
+        self.assertEqual(result["input_normalization"]["applies_to"], "engine-baselines-only")
+
+    def test_exclude_filters_third_concept_family_and_marks_baselines(self):
+        result = compare_methods(
+            "湯気", "睡眠", self.corpus, make_encoder("hash"), limit=len(self.corpus),
+            exclude=["発酵"], p_min=0.0, null_samples=8,
+        )
+        family = ("third-concept", "mean", "third-concept-no-wedge")
+        for name in family:
+            self.assertTrue(all("発酵" not in self.corpus[item["corpus_index"]][2] for item in result["methods"][name]["selected"]))
+        ratio = result["evaluation"]["methods"]["third-concept-ratio"]["selected"]
+        self.assertTrue(all("発酵" not in self.corpus[item["corpus_index"]][2] for item in ratio))
+        baseline_items = [item for name in METHOD_NAMES[:4] for item in result["methods"][name]["selected"]]
+        self.assertTrue(any("発酵" in self.corpus[item["corpus_index"]][2] and item["contains_input"] for item in baseline_items))
+
+    def test_compare_pair_shares_mu_pool_and_records_conditions(self):
+        compare_pair = getattr(comparison, "compare_pair")
+        captured = []
+        original = comparison.shared_geometry_space
+
+        def recording_space(*args, **kwargs):
+            space = original(*args, **kwargs)
+            captured.append(np.asarray(space["mu"]))
+            return space
+
+        with mock.patch.object(comparison, "shared_geometry_space", side_effect=recording_space):
+            result = compare_pair(
+                ("steam", "sleep"), ("steam rises slowly", "sleep restores memory"),
+                self.corpus, make_encoder("hash"), 2, 5, self.corpus_path, ["発酵"], None, 8,
+            )
+        self.assertEqual(result["mode"], "word-vs-sentence")
+        self.assertGreaterEqual(len(captured), 2)
+        for mu in captured[1:]:
+            self.assertTrue(np.allclose(captured[0], mu))
+        self.assertEqual(
+            result["paired"]["shared_conditions"]["mu_query_texts"],
+            ["steam", "sleep", "steam rises slowly", "sleep restores memory"],
+        )
+        expected_methods = set(result["word"]["methods"]) | {"third-concept-ratio"}
+        self.assertEqual(set(result["paired"]["per_method"]), expected_methods)
+        self.assertEqual(result["word"]["evaluation"]["eligible_count"], result["sentence"]["evaluation"]["eligible_count"])
+
+    def test_aggregate_only_cli_removes_all_corpus_markers(self):
+        pair = [
+            {"a": "ZQX-A-01", "b": "ZQX-B-01", "line": "ZQX-LINE-01"},
+            {"a": "ZQX-A-02", "b": "ZQX-B-02", "line": "ZQX-LINE-02"},
+        ]
+        plain = [{"line": "ZQX-PLAIN-01"}, {"line": "ZQX-PLAIN-02"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = []
+            for name, corpus, extra in (
+                ("pair", pair, []),
+                ("plain", plain, []),
+                ("paired", pair, ["--A-sentence", "steam sentence", "--B-sentence", "sleep sentence"]),
+            ):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text(json.dumps(corpus), encoding="utf-8")
+                base = [sys.executable, str(SCRIPTS / "compare_third_concept.py"), "--A", "steam", "--B", "sleep", "--corpus", str(path), "--limit", "2", "--null-samples", "5", *extra]
+                visible = subprocess.run(base, cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8")
+                hidden = subprocess.run([*base, "--aggregate-only"], cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8")
+                cases.append((corpus, visible, hidden))
+            invalid = subprocess.run([*base, "--aggregate-only", "--format", "markdown"], cwd=ROOT, capture_output=True, check=False)
+        for corpus, visible, hidden in cases:
+            markers = [value for row in corpus for value in row.values()]
+            self.assertTrue(any(marker in visible for marker in markers))
+            self.assertTrue(all(marker not in hidden for marker in markers))
+            self.assertTrue(json.loads(hidden)["aggregate_only"])
+        self.assertEqual(invalid.returncode, 2)
+
+    def test_evaluation_is_deterministic_for_same_seed(self):
+        kwargs = {"limit": 3, "seed": 17, "p_min": None, "null_samples": 12}
+        first = compare_methods("湯気", "睡眠", self.corpus, make_encoder("hash"), **kwargs)
+        second = compare_methods("湯気", "睡眠", self.corpus, make_encoder("hash"), **kwargs)
+        self.assertEqual(first["evaluation"], second["evaluation"])
 
 
 if __name__ == "__main__":
