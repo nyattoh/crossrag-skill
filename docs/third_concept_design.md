@@ -174,3 +174,93 @@ stdout は UTF-8 固定（run.py と同じ）。
 - 数学部分は候補プールの外にある概念を出せない。実コーパス（工学・記録系 51 件）では食品系の A・B に対して語彙が合わず、math 候補は的外れになりうる。それはそのまま報告する。
 - emergence は「平面上で二等分方向に近い」ことを測るため、平均ベクトル検索と相関しうる。差はアブレーションで測る。
 - 4 観点の数値は代理指標であり、Coherence と Testability の本当の評価は人手（ブラインド）が必要。PoC では評価シート生成までで、評価は未実施。
+
+## 8. v3: 外積項の比率化と文入力（設計確定・PM）
+
+### 8.1 動機（事実）
+
+実データ（58 節、e5-small、A・B は単語、4 組）で emergence の最大値は 0.002、上位 5 件は 4 組すべてで balance 単独の順位と一致した。類似度が ±0.1 程度だと emergence ≈ 類似度² となり、類似度にほぼ比例する balance に埋もれる。
+
+数学的事実: ‖a∧b∧c‖ = ‖a∧b‖·r（r は平面からの残差）。候補を 1 つずつ評価する限り、3 重外積の大きさは r と同じ情報しか持たない。外積に固有なのは **平面内での向き**（射影 q が A の線・B の線のどちらにも寄らず、その間にあるか）である。v3 はこの向きを大きさから切り離して測る。
+
+### 8.2 新しい量（`geometry()` に追加するキー。既存キーの意味・値は変えない）
+
+記号は 3.3 と同じ（ã, b̃, c̃ は中心化単位ベクトル、ρ = ã·b̃、p = 平面への射影長）。非退化のとき、射影は q⃗ = α ã + β b̃ と一意に書ける:
+
+- α = (s_A − ρ s_B)/(1 − ρ²), β = (s_B − ρ s_A)/(1 − ρ²)
+- `between_AB` = 非退化 ∧ α ≥ −1e-12 ∧ β ≥ −1e-12 ∧ p > 1e-12（射影が A の線と B の線のなす錐の中＝「間」にある。線上を含む）
+- `emergence_ratio` = 1 − max(s_A², s_B²)/p²（`between_AB` ∧ s_A > 0 ∧ s_B > 0 のとき。それ以外 0。[0,1] に clip）
+  - この条件下で emergence_ratio = emergence / p² = 1 − max(cos²(q,ã), cos²(q,b̃))。q の平面内の角度だけで決まり、c の大きさにも面外成分にも依存しない。
+- `emergence_ratio_norm` = clip(emergence_ratio / ((1 − ρ)/2), 0, 1)（上界 ≤ 1e-12 なら 0）
+- `p_below_min` = p < p_min（p_min は 8.3）
+- `score_ratio` = 0.5·(0 if p_below_min else emergence_ratio_norm) + 0.5·balance
+- 方式名 `third-concept-ratio` → `score_ratio`。旧 `third-concept`（`score_third`）はそのまま残し、方式名で区別する。重み 0.5/0.5 は旧式と同じにして、違いを「外積の項」だけにする。
+
+数学的性質（テストで固定）:
+
+1. 角度表現との一致（既知ベクトル）。
+2. 平面内の向きを保ったまま c の大きさ・面外成分を変えても emergence_ratio は不変（emergence は p² 倍で変わる）。
+3. A の線上で 0。二等分線上で (1 − ρ)/2（norm = 1）。錐の中では二等分線が最大（ρ ∈ (−1, 1) の全域で成り立つ）。
+4. **錐ゲートの理由**: s_A > 0 ∧ s_B > 0 だけを条件にすると、ρ > 0.5 のとき錐の外（A の線の外側に回り、B と弱く正）で 1 − max(cos²) が最大 ρ² に達し、二等分線の値 (1 − ρ)/2 を上回る（ρ = 0.8 で 0.64 対 0.10）。これは「A と B の間」ではなく「A から B と反対側へ回った向き」であり、目的に反する。よって錐の外は 0 とする。0 ≤ ρ ≤ 0.5 でも錐の外は最大 ρ² の値を取るため、ゲートは ρ によらず適用する。結果として emergence_ratio = emergence/p² は錐の中でだけ成り立つ（既存 emergence_norm は錐ゲートを持たず、ρ > 0.5 で同じ問題を抱える。既存の意味を変えないため修正しない）。
+5. 退化平面・s_A ≤ 0・s_B ≤ 0 では 0。p < p_min では emergence_ratio は報告するが score_ratio には入れない（= 0.5·balance）。
+
+### 8.3 ノイズ対策: 帰無分布に基づく p の下限（採用）と、採らなかった案
+
+p が小さいと q の向きは埋め込みのノイズでほぼ決まる。比率は大きさを捨てるので、ノイズの向きも同じ重みで数えてしまう。
+
+- **採用: p の下限 p_min を帰無分布から決める。** 既定 `auto` = シャッフル帰無分布での p の 95 パーセンタイル。p_min 未満の候補は「平面成分が無関係なベクトルと区別できない」（片側 5% 水準の目安）ので、その向きを score に使わない。閾値の単位がモデル・コーパスごとに自動で合う。`--p-min <float>` で上書きでき、出力に値と出所（`auto:shuffled-p95` / `user`）を記録する。
+- 不採用: p で重み付け（p·ratio_norm など）。大きさへの依存を戻すため、v2 で外積項が類似度に埋もれた構造を再現する。外積項の寄与を測る目的に反する。
+- 不採用: 固定の絶対閾値（例 p ≥ 0.1）。埋め込みモデル・次元・中心化で p の尺度が変わり、根拠がない。
+- 帰無分布は p_min の決定と評価指標（8.5）に使う。パーセンタイルそのものはスコアに入れない。
+
+帰無分布の作り方（`null_geometry()`、seed で再現）:
+
+- `random`: `np.random.default_rng(seed)` で標準正規 (n, d) を引き、行を正規化した方向。
+- `shuffled`: 中心化単位化したコーパス passage ベクトルを順に巡回し、各々の座標を `np.random.default_rng(seed + 1)` の置換で並べ替える（各ベクトルの座標値の分布を保ち、A・B との意味的な対応だけを壊す）。テキストの再エンコードはしない。
+- どちらも A・B と同じ中心化単位ベクトル ã, b̃ に対して `geometry(ã, b̃, null, mu=None)` で p と emergence_ratio を計算する（null を二重に中心化しない）。
+- 既定 n = 1000。n ≥ 1 の整数、コーパスが空なら ValueError。
+- パーセンタイルは中央順位: 100·(#(null < x) + 0.5·#(null = x))/n。emergence_ratio の帰無分布は 0 に大きな塊を持つため、≤ 方式だと 0 の候補が高く見える。
+
+既知の限界: random 方向の q の向きは平面内で一様になるため、emergence_ratio の random 帰無分布は p に依存しない固定の形（角度一様）になる。シャッフルも高次元では近い。95 パーセンタイルは候補ごとの多重比較を補正しない目安であり、有意性検定ではない。
+
+### 8.4 文入力と除外
+
+- A・B は単語でも短い文でもよい。third-concept 系（`third-concept`, `third-concept-ratio`, `mean`, `third-concept-no-wedge`）は A・B を `encode_query` に渡すので、e5 では文にも `"query: "` が付く（二重付与なし）。
+- `--input-kind sentence`（比較スクリプト）では third-concept 系は A・B を正規化せず原文のまま使う。`engine.run()` の 4 方式は context を区切り文字で分割するため、従来どおり `[、,，/／\s]+ → _` で正規化した文字列を使い、`input_normalization.applies_to` に記録する。`word`（既定）は従来どおり全方式で正規化した文字列を使う。
+- 文入力では A の文に含まれる中心語が、部分一致の除外（候補が A に含まれる／A が候補に含まれる）では外れない。`--exclude TERM`（複数回指定可）で除外語を明示する。
+  - 正規化は既存と同じ（NFKC・casefold・空白除去）。空文字・空白だけの語は ValueError。
+  - 判定は片方向: 正規化した TERM が候補文字列（行の a・b・line、語彙プールの語、仮説の concept）に **含まれる** なら除外。既存の A・B 双方向判定と生コサイン ≥ 0.98 は残し、論理和で除外する。
+  - `exclusion_mask(space, A, B, exclude)` が行ごとの bool を返し、`rank_entries(..., excluded=mask)` は渡された mask をそのまま使う（長さ不一致は ValueError）。
+- 単語と文の同条件比較（`--A-sentence` / `--B-sentence` を `--A` / `--B` と併用）:
+  - μ: 両方の実行で A, B, A_sentence, B_sentence の 4 つを query テキストに含めて同じ μ にする。
+  - 候補集合: 単語側・文側の除外 mask の論理和を両方の third-concept 系に適用し、同じ候補集合で順位を付ける。
+  - encoder・コーパス・limit・seed・exclude・null_samples は共通。p_min は `auto` なら各平面で同じ手順で計算し、両方の値を記録する（`--p-min` で共通値に固定できる）。
+  - 方式ごとに、単語側と文側の上位 k の Jaccard と、共通候補集合での全順位の Kendall τ_b を出す。
+
+### 8.5 評価指標（`compare_third_concept.py`、出力は JSON）
+
+既存の出力キーと値は変えない（ペアコーパス・単語入力・既定値のとき）。新しい内容は最上位キー `evaluation` に入れる。
+
+- `evaluation.methods["third-concept-ratio"]`: 既存方式と同じ形の selected / means。
+- `evaluation.jaccard`: 新方式を含む全方式の上位 k の Jaccard。
+- `evaluation.wedge_ablation`: `third-concept` と `third-concept-ratio` それぞれについて、外積の項を外したスコア（= balance）との Kendall τ_b、`third-concept-no-wedge` との τ_b、上位 k の Jaccard、上位 k 列が完全一致か。τ は除外後の全候補で計算し、stdlib で O(n²)、tie は τ_b、分母 0 なら null。
+- `evaluation.null`: n、seed、p の 50/95 パーセンタイル（random / shuffled）、p_min、各方式の上位 k の emergence_ratio と p の帰無分布パーセンタイル（平均と候補ごと）、除外後全候補の emergence_ratio の最大・中央値、p_below_min の割合、between_AB の割合。
+- 本文だけのコーパス（文字列または `{"line": ...}` のみ）: `engine.run()` はペアラベルが必要なので使えない。`similar`（中心化しない A+B 平均方向とのコサイン）と `random`（`default_rng(seed)` の置換）を共有空間で計算し、`orthogonal` / `wedge` は省いて notes に書く。`evaluation.baseline_source` = `engine.run` / `shared-space`。
+- `--aggregate-only`: コーパス本文（a・b・line）を出力に含めない。selected は corpus_index と数値だけになる。JSON 専用（`--format markdown` と併用不可）。入力 A・B の文字列は残る（文入力に個人的な内容を使う場合は注意）。
+- 結果が既存手法を上回らなくても、そのまま出力する。third-concept 系の score 平均で勝つことは循環的であり、優越性の証拠にしない（既存 notes を維持）。
+
+### 8.6 何を数学で、何を LLM でやるか
+
+| 区分 | 数学（このリポジトリのコード） | LLM（外部、仮説ファイル経由） |
+|---|---|---|
+| 候補の生成 | しない。コーパス・語彙プール・仮説ファイルにある候補の順位付けだけ | 新しい概念名・説明・反証方法を作る |
+| 「A と B の両方が要る」か | 平面内の向き（emergence_ratio、錐ゲート）と平面成分の大きさ（p, p_min）で測る代理指標 | 意味的な必然性の説明（why_requires_AB）。未検証 |
+| ノイズ・偶然 | 帰無分布（random / shuffled）とパーセンタイル | 扱わない |
+| 品質（意外性・整合性・検証可能性） | 測らない | 自己評価のみ（独立評価ではない）。本当の評価は人手のブラインド評価 |
+
+### 8.7 v3 の既知の限界
+
+- 比率は p と独立なので、p_min を超えたばかりの候補と大きな p の候補を同じ重みで扱う。p_min の付近の順位は不安定でありうる。
+- 錐ゲートは「A と B の正の組み合わせ」を要求する。A と B の差（αã − βb̃）で表される概念は 0 になる。
+- 帰無分布は埋め込み空間の形だけを使う。意味の偶然一致（コーパスの話題の偏り）は表さない。
+- 文入力では engine.run() の 4 方式が正規化した文を使うため、第三概念系と入力表現が完全には一致しない（記録して報告する）。
