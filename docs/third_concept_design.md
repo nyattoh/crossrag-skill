@@ -270,3 +270,7 @@ p が小さいと q の向きは埋め込みのノイズでほぼ決まる。比
 - `explore(method="third-concept-ratio")` では仮説候補を score_ratio の降順に並べる。`third-concept`（既定）は従来どおり仮説ファイルの順を保つ。方式によって並び順の扱いが異なる点に注意する。
 - explore の `params.weights` は旧式（emergence_norm 0.5 / balance 0.5）の記録のまま。ratio 方式の重みは 8.2 の定義（emergence_ratio_norm 0.5 / balance 0.5、p_min 未満は前者 0）による。
 - `rank_entries()` の p_min の既定値は 0（下限なし）。auto 下限は `explore()` と比較スクリプトで計算する。
+- 文入力の除外（レビュー round 1 の minor 5 への対応。仕様として明記する）: 既存の双方向判定は文入力でも残す。そのため、ペアラベル・語彙・仮説 concept が A・B の **文に含まれる** 語なら除外される（例: A = 「湯気が窓を曇らせる」なら a = 「窓」の行は除外）。文に含まれる語は A の内容そのものなので、第三概念の候補から外すのを妥当とする。paired 比較では両側の除外 mask の論理和をとるため、この除外は単語側の候補集合にも及ぶ（同じ候補集合で比べるための意図した挙動）。文に含まれない中心語は `--exclude` で明示する。
+- `rank_entries(excluded=...)` に mask を渡すと、`exclude` 引数は使われない（mask が優先される）。
+- 集計の平均は、対象が 0 件のとき 0.0 になる。実測の 0 と見分けるには `eligible_count` と selected の件数を併せて見る。
+- `explore()` は既定の third-concept 方式でも帰無分布を計算する。`heuristic_ratio.p_below_min` を出すためで、そのぶん 1 回あたり数千回の幾何計算が増える。
