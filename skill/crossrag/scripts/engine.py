@@ -124,7 +124,11 @@ def run(context, corpus=None, mode='orthogonal', novelty=0.55, coherence=0.8, li
         rows.append({'index':i,'a':a,'b':b,'line':line,'score':round(float(score),5),'cosine':round(sim,5),'orthogonal':round(orth,5),'wedge':round(wedge,5)})
     rows.sort(key=lambda x:(-x['score'],x['index']))
     selected=rows[:int(np.clip(limit,1,20))]
-    return {'context':words,'mode':mode,'encoder':enc.name,'selected':selected,'total':len(corpus),'note':'スコアは実験的なヒューリスティック。創作品質との相関は未検証。'}
+    warnings=[]
+    # ponytail: wedge check only looks at the default-encoder degeneracy; no fix beyond reporting it
+    if mode=='wedge' and all(abs(r['wedge'])<1e-9 for r in rows):
+        warnings.append('wedge は全候補で0です。文脈の先頭2語が候補の語対と文字を共有せず、wedge の項が一定になっています。wedge の順位は類似度と帯域の順位と同じです。')
+    return {'context':words,'mode':mode,'encoder':enc.name,'selected':selected,'total':len(corpus),'warnings':warnings,'note':'スコアは実験的なヒューリスティック。創作品質との相関は未検証。'}
 
 
 def make_seed_text(result):

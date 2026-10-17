@@ -24,6 +24,8 @@ def load_corpus(path):
 
 
 def main():
+    # Windows consoles default to a legacy code page; the JSON contract is UTF-8.
+    sys.stdout.reconfigure(encoding='utf-8')
     p = argparse.ArgumentParser(description='CrossRAG creative/discovery retrieval')
     p.add_argument('--context', required=True, help='Two or more concepts separated by commas')
     p.add_argument('--mode', choices=['creative', 'discovery'], default='creative')
