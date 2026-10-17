@@ -18,6 +18,7 @@ from third_concept import (
     _normalised_exclude_terms,
     _normalised_text,
     _rows,
+    _validated_p_min,
     auto_p_min,
     corpus_id,
     exclusion_mask,
@@ -118,6 +119,7 @@ def _jaccard(left, right):
 
 def kendall_tau_b(x, y):
     """Return Kendall's tau-b using an O(n^2) pair count."""
+    # ponytail: O(n^2) is fine for ~1e3 rows; use Knight's O(n log n) algorithm for many thousands.
     left = list(x)
     right = list(y)
     if len(left) != len(right):
@@ -182,16 +184,6 @@ def _selected_entry(name, index, rows, common_metrics, A, B, terms, plain=False)
     if name in METHOD_NAMES[:4]:
         entry["contains_input"] = _row_contains(rows[index], A, B, terms)
     return entry
-
-
-def _validate_p_min(value):
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("p_min must be finite and between 0 and 1") from exc
-    if not math.isfinite(parsed) or not 0.0 <= parsed <= 1.0:
-        raise ValueError("p_min must be finite and between 0 and 1")
-    return parsed
 
 
 def _plain_baselines(space, limit, seed):
@@ -331,7 +323,7 @@ def _compare(
         used_p_min = auto_p_min(null)
         p_min_source = "auto:shuffled-p95"
     else:
-        used_p_min = _validate_p_min(p_min)
+        used_p_min = _validated_p_min(p_min)
         p_min_source = "user"
 
     ranked = {}
@@ -660,6 +652,8 @@ def main():
         parser.error("--sheet-dir cannot be used with --A-sentence/--B-sentence")
     if args.aggregate_only and args.format == "markdown":
         parser.error("--aggregate-only is available only with --format json")
+    if args.aggregate_only and args.sheet_dir:
+        parser.error("--aggregate-only cannot be used with --sheet-dir")
     try:
         rows = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
         encoder = make_encoder(args.encoder, args.model)

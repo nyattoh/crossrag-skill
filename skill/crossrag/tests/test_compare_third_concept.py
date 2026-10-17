@@ -264,6 +264,9 @@ class ComparisonV3Test(unittest.TestCase):
         midrank_percentile = getattr(comparison, "midrank_percentile")
         self.assertEqual(kendall_tau_b([1, 2, 3], [1, 2, 3]), 1.0)
         self.assertEqual(kendall_tau_b([1, 2, 3], [3, 2, 1]), -1.0)
+        self.assertEqual(kendall_tau_b([1, 1, 2], [1, 1, 3]), 1.0)
+        # One joint tie is ignored; P=4 and Q=1, so tau_b = (4-1) / 5.
+        self.assertAlmostEqual(kendall_tau_b([1, 1, 2, 3], [1, 1, 3, 2]), 3 / 5)
         # P=2, Q=0, T_x=1, T_y=0, so tau_b = 2 / sqrt((2+0)*(2+1)).
         self.assertAlmostEqual(kendall_tau_b([1, 1, 2], [1, 2, 3]), 2 / np.sqrt(6))
         self.assertIsNone(kendall_tau_b([1, 1, 1], [1, 2, 3]))
@@ -296,6 +299,60 @@ class ComparisonV3Test(unittest.TestCase):
             [0.141421, 0.141421, 0.979796],
         ])
         self.assertTrue(result["evaluation"]["wedge_ablation"]["third-concept-ratio"]["topk_identical_to_balance"])
+
+    def test_wedge_ablation_tau_uses_each_score_against_the_named_baseline(self):
+        candidates = [
+            [0.10, 0.60, 0.793725],
+            [0.35, 0.35, 0.868907],
+            [0.55, 0.20, 0.811788],
+            [0.45, 0.45, 0.771362],
+        ]
+        A = np.array([1.0, 0.0, 0.0])
+        B = np.array([0.0, 1.0, 0.0])
+        compensation = -np.sum(np.asarray([A, B, *candidates]), axis=0)
+        lines = [f"tau-node-{index}" for index in range(len(candidates))] + ["tau-counter-vector"]
+        vectors = {"tau-left": A, "tau-right": B, **dict(zip(lines, [*candidates, compensation]))}
+        captured = []
+        original = comparison.shared_geometry_space
+
+        def recording_space(*args, **kwargs):
+            space = original(*args, **kwargs)
+            captured.append(space)
+            return space
+
+        with mock.patch.object(comparison, "shared_geometry_space", side_effect=recording_space):
+            result = compare_methods(
+                "tau-left", "tau-right", lines, FixedEncoder(vectors), limit=2, seed=3,
+                p_min=0.0, null_samples=8,
+            )
+
+        self.assertEqual(len(captured), 1)
+        space = captured[0]
+        metrics = comparison.geometry(
+            space["a_vector"], space["b_vector"], space["passage_vectors"],
+            mu=space["mu"], p_min=0.0,
+        )
+        excluded = comparison.exclusion_mask(space, "tau-left", "tau-right")
+        eligible = [index for index, value in enumerate(excluded) if not value]
+        expected_by_method = {
+            "third-concept": "score_third",
+            "third-concept-ratio": "score_ratio",
+        }
+        baselines = {
+            "kendall_tau_b_vs_balance": "balance",
+            "kendall_tau_b_vs_no_wedge": "score_no_wedge",
+        }
+        for method, score_name in expected_by_method.items():
+            for output_name, baseline_name in baselines.items():
+                expected = comparison.kendall_tau_b(
+                    [metrics[index][score_name] for index in eligible],
+                    [metrics[index][baseline_name] for index in eligible],
+                )
+                self.assertNotEqual(comparison._round_optional(expected), 1.0)
+                self.assertEqual(
+                    result["evaluation"]["wedge_ablation"][method][output_name],
+                    comparison._round_optional(expected),
+                )
 
     def test_plain_text_corpora_work_in_api_and_cli(self):
         plain = ["PLAIN-LINE-01", {"line": "PLAIN-LINE-02"}, "PLAIN-LINE-03"]
@@ -428,6 +485,35 @@ class ComparisonV3Test(unittest.TestCase):
             comparison._round_optional(expected),
         )
 
+    def test_compare_pair_uses_union_of_word_and_sentence_exclusions(self):
+        compare_pair = getattr(comparison, "compare_pair")
+        corpus = ["sentence-only", "eligible-one", "eligible-two"]
+        vectors = {
+            "word-left": [1.0, 0.0, 0.0, 0.0],
+            "word-right": [0.0, 1.0, 0.0, 0.0],
+            "prefix sentence-only suffix": [0.0, 0.0, 1.0, 0.0],
+            "sentence-right": [0.0, 0.0, 0.0, 1.0],
+            "sentence-only": [0.5, 0.5, 0.5, 0.5],
+            "eligible-one": [0.6, 0.2, 0.3, 0.7],
+            "eligible-two": [0.2, 0.7, 0.6, 0.3],
+        }
+        result = compare_pair(
+            ("word-left", "word-right"),
+            ("prefix sentence-only suffix", "sentence-right"),
+            corpus, FixedEncoder(vectors), len(corpus), 4, None, [], 0.0, 7,
+        )
+
+        family = ("third-concept", "mean", "third-concept-no-wedge")
+        for run_name in ("word", "sentence"):
+            run = result[run_name]
+            for method in family:
+                selected = run["methods"][method]["selected"]
+                self.assertNotIn(0, [item["corpus_index"] for item in selected])
+            ratio = run["evaluation"]["methods"]["third-concept-ratio"]["selected"]
+            self.assertNotIn(0, [item["corpus_index"] for item in ratio])
+            self.assertEqual(run["evaluation"]["eligible_count"], 2)
+        self.assertEqual(result["paired"]["shared_conditions"]["eligible_count"], 2)
+
     def test_paired_cli_rejects_sheet_dir(self):
         completed = subprocess.run(
             [
@@ -467,6 +553,24 @@ class ComparisonV3Test(unittest.TestCase):
             self.assertTrue(all(marker not in hidden for marker in markers))
             self.assertTrue(json.loads(hidden)["aggregate_only"])
         self.assertEqual(invalid.returncode, 2)
+
+    def test_aggregate_only_cli_rejects_sheet_dir_before_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sheet_dir = Path(tmp) / "blind-output"
+            completed = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "compare_third_concept.py"),
+                    "--A", "steam", "--B", "sleep", "--corpus", str(self.corpus_path),
+                    "--aggregate-only", "--sheet-dir", str(sheet_dir), "--null-samples", "5",
+                ],
+                cwd=ROOT, capture_output=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "--aggregate-only cannot be used with --sheet-dir",
+                completed.stderr.decode("utf-8", errors="replace"),
+            )
+            self.assertFalse(sheet_dir.exists())
 
     def test_evaluation_is_deterministic_for_same_seed(self):
         kwargs = {"limit": 3, "seed": 17, "p_min": None, "null_samples": 12}

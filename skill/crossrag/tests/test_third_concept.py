@@ -32,6 +32,7 @@ from third_concept import (  # noqa: E402
     rank_entries,
     shared_geometry_space,
 )
+import third_concept as third_concept_module  # noqa: E402
 
 
 def load_rows(path: Path):
@@ -510,6 +511,42 @@ class NullGeometryTest(unittest.TestCase):
         self.assertFalse(np.array_equal(one["random"]["p"], other["random"]["p"]))
         self.assertFalse(np.array_equal(one["shuffled"]["p"], other["shuffled"]["p"]))
         self.assertEqual(auto_p_min(one), float(np.percentile(one["shuffled"]["p"], 95)))
+
+    def test_null_geometry_uses_centred_unit_passages_without_recentering(self):
+        n = 11
+        seed = 23
+        captured = []
+        original_geometry = third_concept_module.geometry
+
+        def recording_geometry(a_vec, b_vec, candidates, mu=None, p_min=0.0):
+            captured.append(np.asarray(candidates, dtype=float).copy())
+            return original_geometry(a_vec, b_vec, candidates, mu=mu, p_min=p_min)
+
+        with mock.patch.object(third_concept_module, "geometry", side_effect=recording_geometry):
+            actual = null_geometry(self.a, self.b, self.passages, self.mu, n=n, seed=seed)
+
+        unit = lambda vector: np.asarray(vector, dtype=float) / np.linalg.norm(vector)
+        a_c = unit(self.a - self.mu)
+        b_c = unit(self.b - self.mu)
+        centred_units = np.asarray([unit(vector - self.mu) for vector in self.passages])
+        self.assertEqual(len(captured), 2)
+        actual_shuffled = captured[1]
+        for index, sample in enumerate(actual_shuffled):
+            self.assertTrue(
+                np.allclose(np.sort(sample), np.sort(centred_units[index % len(centred_units)]))
+            )
+
+        random_rows = np.random.default_rng(seed).standard_normal((n, self.a.size))
+        random_samples = np.asarray([unit(vector) for vector in random_rows])
+        shuffled_rng = np.random.default_rng(seed + 1)
+        shuffled_samples = np.asarray([
+            centred_units[index % len(centred_units)][shuffled_rng.permutation(self.a.size)]
+            for index in range(n)
+        ])
+        for name, samples in (("random", random_samples), ("shuffled", shuffled_samples)):
+            expected_rows = original_geometry(a_c, b_c, samples, mu=None)
+            self.assertTrue(np.allclose(actual[name]["p"], [row["plane_projection"] for row in expected_rows]))
+            self.assertTrue(np.allclose(actual[name]["emergence_ratio"], [row["emergence_ratio"] for row in expected_rows]))
 
     def test_null_geometry_rejects_invalid_size_and_empty_passages(self):
         with self.assertRaises(ValueError):
