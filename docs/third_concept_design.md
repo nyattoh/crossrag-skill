@@ -227,7 +227,7 @@ p が小さいと q の向きは埋め込みのノイズでほぼ決まる。比
 
 - A・B は単語でも短い文でもよい。third-concept 系（`third-concept`, `third-concept-ratio`, `mean`, `third-concept-no-wedge`）は A・B を `encode_query` に渡すので、e5 では文にも `"query: "` が付く（二重付与なし）。
 - `--input-kind sentence`（比較スクリプト）では third-concept 系は A・B を正規化せず原文のまま使う。`engine.run()` の 4 方式は context を区切り文字で分割するため、従来どおり `[、,，/／\s]+ → _` で正規化した文字列を使い、`input_normalization.applies_to` に記録する。`word`（既定）は従来どおり全方式で正規化した文字列を使う。
-- 文入力では A の文に含まれる中心語が、部分一致の除外（候補が A に含まれる／A が候補に含まれる）では外れない。`--exclude TERM`（複数回指定可）で除外語を明示する。
+- 文入力では A の文に含まれる中心語が、部分一致の除外（候補が A に含まれる／A が候補に含まれる）では外れない。（これは本文の長い候補行の話。文に含まれる短いラベル・語彙の扱いは 8.8 を参照）`--exclude TERM`（複数回指定可）で除外語を明示する。
   - 正規化は既存と同じ（NFKC・casefold・空白除去）。空文字・空白だけの語は ValueError。
   - 判定は片方向: 正規化した TERM が候補文字列（行の a・b・line、語彙プールの語、仮説の concept）に **含まれる** なら除外。既存の A・B 双方向判定と生コサイン ≥ 0.98 は残し、論理和で除外する。
   - `exclusion_mask(space, A, B, exclude)` が行ごとの bool を返し、`rank_entries(..., excluded=mask)` は渡された mask をそのまま使う（長さ不一致は ValueError）。
@@ -274,3 +274,4 @@ p が小さいと q の向きは埋め込みのノイズでほぼ決まる。比
 - `rank_entries(excluded=...)` に mask を渡すと、`exclude` 引数は使われない（mask が優先される）。
 - 集計の平均は、対象が 0 件のとき 0.0 になる。実測の 0 と見分けるには `eligible_count` と selected の件数を併せて見る。
 - `explore()` は既定の third-concept 方式でも帰無分布を計算する。`heuristic_ratio.p_below_min` を出すためで、そのぶん 1 回あたり数千回の幾何計算が増える。
+- 1 文字のラベル（例: 「光」）は多くの文に部分一致するため、文入力では候補がまとめて除外されうる。除外の規模は `evaluation.eligible_count` / `excluded_count` で確認する。
