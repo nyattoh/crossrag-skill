@@ -193,6 +193,10 @@ class ExplorationContractTest(unittest.TestCase):
         self.assertEqual({candidate["concept"] for candidate in data["candidates"]}, {"文一", "文二"})
         self.assertEqual(data["params"]["vocab_size"], 0)
 
+    def test_misspelled_pair_keys_are_rejected_not_read_as_plain_text(self):
+        with self.assertRaisesRegex(ValueError, "corpus item"):
+            explore("湯気", "睡眠", [{"aa": "夢", "bb": "記憶", "line": "夜の記録"}], self.encoder)
+
     def test_json_schema(self):
         data = explore("湯気", "睡眠", self.corpus, self.encoder, limit=5, corpus_path=self.corpus_path)
         self.assertTrue({"mode", "input", "encoder", "corpus_id", "corpus_size", "params", "origin_legend", "candidates", "warnings", "disclaimer"} <= data.keys())
@@ -361,6 +365,15 @@ class LeakageAndCliTest(unittest.TestCase):
         data = json.loads(output.decode("utf-8"))
         self.assertEqual(data["corpus_size"], 2)
         self.assertEqual({candidate["origin"] for candidate in data["candidates"]}, {"retrieved"})
+
+    def test_cli_rejects_misspelled_pair_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "typo.json"
+            path.write_text(json.dumps([{"aa": "夢", "bb": "記憶", "line": "夜の記録"}], ensure_ascii=False), encoding="utf-8")
+            command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "雨", "--B", "時計", "--corpus", str(path), "--encoder", "hash"]
+            completed = subprocess.run(command, cwd=ROOT, capture_output=True)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn(b"corpus item", completed.stderr)
 
     def test_cli_rejects_non_positive_limit(self):
         command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "湯気", "--B", "睡眠", "--limit", "0"]

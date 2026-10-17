@@ -139,11 +139,15 @@ def geometry(a_vec, b_vec, c_vecs, mu=None):
     return results
 
 
+def is_plain_row(row):
+    """A plain-text row is a string or a dict whose only key is "line"; it carries no concept pair."""
+    return isinstance(row, str) or (isinstance(row, dict) and set(row) == {"line"})
+
+
 def _rows(corpus):
     rows = []
     for row in corpus:
-        # Plain-text rows (a string, or a dict with only "line") carry no concept pair: a and b are None.
-        if isinstance(row, str) or (isinstance(row, dict) and "a" not in row and "b" not in row):
+        if is_plain_row(row):
             line = row if isinstance(row, str) else row.get("line")
             if not isinstance(line, str) or not line.strip():
                 raise ValueError("plain-text corpus items must be non-empty strings")

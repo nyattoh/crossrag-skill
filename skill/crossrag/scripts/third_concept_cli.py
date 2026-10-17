@@ -9,7 +9,7 @@ from pathlib import Path
 
 from engine import DEFAULT_CORPUS
 from run import load_corpus
-from third_concept import build_hypothesis_prompt, explore, load_hypotheses, make_encoder
+from third_concept import build_hypothesis_prompt, explore, is_plain_row, load_hypotheses, make_encoder
 
 
 def positive_limit(value):
@@ -21,8 +21,8 @@ def positive_limit(value):
 
 def read_corpus(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    # Plain-text corpora (strings or {"line": ...}) are validated by explore(); pair corpora keep the legacy loader.
-    if isinstance(data, list) and any(isinstance(row, str) or (isinstance(row, dict) and "a" not in row and "b" not in row) for row in data):
+    # Any plain-text row routes the corpus to explore(), which validates every row; pair corpora keep the legacy loader.
+    if isinstance(data, list) and any(is_plain_row(row) for row in data):
         return data
     return load_corpus(path)
 
