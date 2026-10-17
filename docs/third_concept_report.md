@@ -137,3 +137,58 @@ $env:HF_HUB_OFFLINE='1'; python scripts/compare_third_concept.py --A '<A>' --B '
 【事実】ブラインド人手評価は未実施であり、unexpectedness、coherence、emergence、testability の品質差、既知事例以外の有用性、再現性は判断できない。
 
 【着想】次の最小評価は、方式キーを開く前に複数評価者が v2 のブラインドシートを採点し、評価者間一致、方式別分布、ケース別の失敗類型を報告することである。
+
+## 9. v3: 外積項の比率化・帰無分布・文入力（実装済み、実データ未実行）
+
+【事実】v2 の実データ 4 組では emergence の最大値が 0.002 で、上位 5 件は balance 単独の順位と一致した。v3 は外積に固有の情報（平面内の向き）を大きさから切り離して測り、その寄与を測定できるようにする。定義・根拠の詳細は design §8。
+
+### 9.1 新しい量
+
+【数学的結果】非退化平面で、射影を q⃗ = αã + βb̃（α = (s_A − ρs_B)/(1 − ρ²), β = (s_B − ρs_A)/(1 − ρ²)）と書く。
+
+- `between_AB`: α ≥ 0 ∧ β ≥ 0（射影が A の線と B の線のなす錐の中）。
+- `emergence_ratio` = 1 − max(s_A², s_B²)/p² = 1 − max(cos²(q,ã), cos²(q,b̃))（between_AB ∧ s_A > 0 ∧ s_B > 0 のとき。他は 0）。錐の中では emergence/p² に等しい。
+- `emergence_ratio_norm` = emergence_ratio / ((1 − ρ)/2)。二等分線で 1。
+- `score_ratio` = 0.5·(p ≥ p_min なら emergence_ratio_norm、未満なら 0) + 0.5·balance。方式名 `third-concept-ratio`。旧 `score_third` と `emergence_norm` は変更しない。
+
+【数学的結果】テストで固定した性質: 角度表現との一致、c の大きさ・面外成分に対する不変性、A の線上で 0、二等分線で (1 − ρ)/2 かつ錐の中の最大（ρ = −0.6, 0, 0.3, 0.8）、退化平面・s_A ≤ 0・s_B ≤ 0 で 0、p < p_min で score_ratio = 0.5·balance。
+
+【数学的結果】錐ゲートの理由: s_A > 0 ∧ s_B > 0 だけでは、ρ > 0.5 のとき錐の外で 1 − max(cos²) が最大 ρ² になり、二等分線の (1 − ρ)/2 を上回る（ρ = 0.8 で 0.64 対 0.10）。これは「A と B の間」ではないので 0 とした。既存の emergence_norm は同じ問題を持つが、意味を変えないために修正していない。
+
+### 9.2 ノイズ対策
+
+【事実】採用したのは、帰無分布で決める p の下限 `p_min` である。既定は `auto` で、座標をシャッフルした passage ベクトル（seed + 1）での p の 95 パーセンタイルを使う。p で重み付けする案は大きさへの依存が戻るため採らなかった。固定の絶対閾値は尺度がモデルに依存するため採らなかった。比較スクリプトは、各方式の上位 k の emergence_ratio と p について、ランダム方向（seed）とシャッフルの帰無分布に対する中央順位パーセンタイルを出す。
+
+【限界】ランダム方向での emergence_ratio の帰無分布は、平面内の角度が一様になることから決まる固定の形で、p に依存しない。95 パーセンタイルは多重比較を補正しない目安であり、有意性検定ではない。
+
+### 9.3 文入力と除外
+
+【事実】A・B は短い文でもよい。e5 では文にも `query: ` が 1 回だけ付く（テストで固定）。比較スクリプトの `--input-kind sentence` は、third-concept 系に原文を渡し、engine.run() の 4 方式には正規化した文を渡す（`input_normalization.applies_to` に記録）。`--exclude TERM` は、NFKC・casefold・空白除去で正規化した TERM が候補（a・b・line、語彙、仮説の concept）に含まれていれば除外する。判定は片方向で、既存の A・B 双方向判定と生コサイン ≥ 0.98 の除外も残す。`--A-sentence/--B-sentence` を指定すると、単語側と文側を同じ μ・同じ候補集合（両側の除外 mask の論理和）で比べ、方式ごとに上位 k の Jaccard と Kendall τ_b を出す。
+
+### 9.4 数学と LLM の分担
+
+【事実】数学部分は候補を生成しない。コーパス・語彙・仮説ファイルにある候補を、平面内の向き（emergence_ratio）、平面成分の大きさ（p, p_min）、帰無分布で位置づけるだけである。概念名・説明・反証方法を作るのは外部の LLM で、その出力は未検証の仮説として扱う。品質（意外性・整合性・検証可能性）は数学部分では測らず、人手のブラインド評価が必要である。
+
+### 9.5 実データの結果（親が実行予定）
+
+| 組 | 入力 | p_min | τ_b(score_third, balance) | τ_b(score_ratio, balance) | 上位 k 一致(旧/新 vs balance) | ratio 上位の emergence_ratio パーセンタイル(random/shuffled) | 単語 vs 文 Jaccard(ratio) |
+|---|---|---|---|---|---|---|---|
+| （親が実行予定） | | | | | | | |
+
+結果が既存手法を上回らなくても、そのまま記入する。
+
+### 9.6 実行コマンド例
+
+```bash
+cd skill/crossrag
+# 単語入力（集計のみ）
+python scripts/compare_third_concept.py --A <語A> --B <語B> --corpus <corpus.json> --encoder semantic --limit 5 --seed 0 --aggregate-only
+# 文入力 + 中心語の除外
+python scripts/compare_third_concept.py --A "<文A>" --B "<文B>" --input-kind sentence --exclude <中心語A> --exclude <中心語B> --corpus <corpus.json> --encoder semantic --aggregate-only
+# 単語と文の同条件比較
+python scripts/compare_third_concept.py --A <語A> --B <語B> --A-sentence "<文A>" --B-sentence "<文B>" --exclude <中心語A> --corpus <corpus.json> --encoder semantic --null-samples 1000 --aggregate-only
+# 候補の抽出（新方式）
+python scripts/third_concept_cli.py --A "<文A>" --B "<文B>" --corpus <corpus.json> --encoder semantic --method third-concept-ratio --exclude <中心語A>
+```
+
+`--aggregate-only` はコーパス本文（a・b・line）を出力から外すが、入力 A・B の文字列は残る。

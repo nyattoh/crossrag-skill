@@ -264,3 +264,9 @@ p が小さいと q の向きは埋め込みのノイズでほぼ決まる。比
 - 錐ゲートは「A と B の正の組み合わせ」を要求する。A と B の差（αã − βb̃）で表される概念は 0 になる。
 - 帰無分布は埋め込み空間の形だけを使う。意味の偶然一致（コーパスの話題の偏り）は表さない。
 - 文入力では engine.run() の 4 方式が正規化した文を使うため、第三概念系と入力表現が完全には一致しない（記録して報告する）。
+
+### 8.8 実装上の補足（統合時に PM が追記）
+
+- `explore(method="third-concept-ratio")` では仮説候補を score_ratio の降順に並べる。`third-concept`（既定）は従来どおり仮説ファイルの順を保つ。方式によって並び順の扱いが異なる点に注意する。
+- explore の `params.weights` は旧式（emergence_norm 0.5 / balance 0.5）の記録のまま。ratio 方式の重みは 8.2 の定義（emergence_ratio_norm 0.5 / balance 0.5、p_min 未満は前者 0）による。
+- `rank_entries()` の p_min の既定値は 0（下限なし）。auto 下限は `explore()` と比較スクリプトで計算する。
