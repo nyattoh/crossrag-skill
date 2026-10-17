@@ -141,6 +141,13 @@ def geometry(a_vec, b_vec, c_vecs, mu=None):
 def _rows(corpus):
     rows = []
     for row in corpus:
+        # Plain-text rows (a string, or a dict with only "line") carry no concept pair: a and b are None.
+        if isinstance(row, str) or (isinstance(row, dict) and "a" not in row and "b" not in row):
+            line = row if isinstance(row, str) else row.get("line")
+            if not isinstance(line, str) or not line.strip():
+                raise ValueError("plain-text corpus items must be non-empty strings")
+            rows.append((None, None, line))
+            continue
         if isinstance(row, dict):
             row = (row.get("a"), row.get("b"), row.get("line"))
         if not isinstance(row, (list, tuple)) or len(row) != 3 or not all(isinstance(value, str) and value.strip() for value in row):
@@ -149,11 +156,15 @@ def _rows(corpus):
     return rows
 
 
+def _row_values(row):
+    return [value for value in row if value is not None]
+
+
 def _vocabulary_pool(rows, vocab=None):
     pool = []
     for a, b, _ in rows:
         for value in (a, b):
-            if value not in pool:
+            if value is not None and value not in pool:
                 pool.append(value)
     for value in vocab or []:
         if not isinstance(value, str) or not value.strip():
@@ -173,7 +184,7 @@ def shared_geometry_space(A, B, corpus, encoder, vocab=None, center=True):
             query_texts.append(value)
     query_vectors = encoder.encode_query(query_texts)
     query_by_text = dict(zip(query_texts, query_vectors))
-    passage_texts = [f"{a}と{b}。{line}" for a, b, line in rows]
+    passage_texts = [line if a is None else f"{a}と{b}。{line}" for a, b, line in rows]
     passage_vectors = encoder.encode_passage(passage_texts)
     all_vectors = np.vstack([query_vectors, passage_vectors])
     return {
@@ -213,7 +224,7 @@ def rank_entries(A, B, corpus, encoder, method, limit, center=True, space=None, 
     )
     for index, scores in all_ranked:
         a, b, line = rows[index]
-        if any(_contains_input(value, exclusion_a, exclusion_b) for value in (a, b, line)) or cosine_excluded[index]:
+        if any(_contains_input(value, exclusion_a, exclusion_b) for value in _row_values(rows[index])) or cosine_excluded[index]:
             continue
         ranked.append({"index": index, "a": a, "b": b, "line": line, "score": scores[SCORE_BY_METHOD[method]], "scores": scores})
         if len(ranked) >= int(limit):
@@ -329,7 +340,7 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
     retrieved_number = 0
     for index, scores in ranked_passages:
         a, b, line = rows[index]
-        if any(_contains_input(value, A, B) for value in (a, b, line)) or passage_cosine_excluded[index]:
+        if any(_contains_input(value, A, B) for value in _row_values(rows[index])) or passage_cosine_excluded[index]:
             excluded += 1
             continue
         if retrieved_number < int(limit):

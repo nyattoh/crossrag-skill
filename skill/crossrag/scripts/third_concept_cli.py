@@ -19,6 +19,14 @@ def positive_limit(value):
     return parsed
 
 
+def read_corpus(path):
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    # Plain-text corpora (strings or {"line": ...}) are validated by explore(); pair corpora keep the legacy loader.
+    if isinstance(data, list) and any(isinstance(row, str) or (isinstance(row, dict) and "a" not in row and "b" not in row) for row in data):
+        return data
+    return load_corpus(path)
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Explore third-concept candidates from A and B")
@@ -39,7 +47,7 @@ def main():
         if args.emit_prompt and not args.with_math:
             print(build_hypothesis_prompt(args.A, args.B))
             return
-        corpus = load_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
+        corpus = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
         encoder = make_encoder(args.encoder, args.model)
         vocab = None
         if args.vocab:

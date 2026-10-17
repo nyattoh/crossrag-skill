@@ -174,6 +174,14 @@ class ExplorationContractTest(unittest.TestCase):
         for method in ("third-concept", "third-concept-no-wedge", "mean"):
             self.assertEqual(rank_entries("A", "B", corpus, encoder, method, 5), [])
 
+    def test_plain_text_rows_are_passages_without_pair_labels(self):
+        # FixedEncoder raises KeyError if a passage is wrapped as "aとb。line".
+        encoder = FixedEncoder({"A": [1, 0, 0], "B": [0, 1, 0], "文一": [0.5, 0.5, 0.7], "文二": [0.2, 0.6, 0.77]})
+        data = explore("A", "B", ["文一", {"line": "文二"}], encoder, limit=5)
+        self.assertEqual({candidate["origin"] for candidate in data["candidates"]}, {"retrieved"})
+        self.assertEqual({candidate["concept"] for candidate in data["candidates"]}, {"文一", "文二"})
+        self.assertEqual(data["params"]["vocab_size"], 0)
+
     def test_json_schema(self):
         data = explore("湯気", "睡眠", self.corpus, self.encoder, limit=5, corpus_path=self.corpus_path)
         self.assertTrue({"mode", "input", "encoder", "corpus_id", "corpus_size", "params", "origin_legend", "candidates", "warnings", "disclaimer"} <= data.keys())
@@ -332,6 +340,16 @@ class LeakageAndCliTest(unittest.TestCase):
         self.assertIn("概念A「湯気」", prompt)
         self.assertIn("概念B「睡眠」", prompt)
         self.assertIn('{"hypotheses": [...]}', prompt)
+
+    def test_cli_accepts_plain_text_corpus(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plain.json"
+            path.write_text(json.dumps(["湯気が窓を曇らせる", {"line": "眠る前に灯りを消す"}], ensure_ascii=False), encoding="utf-8")
+            command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "雨", "--B", "時計", "--corpus", str(path), "--encoder", "hash"]
+            output = subprocess.run(command, cwd=ROOT, capture_output=True, check=True).stdout
+        data = json.loads(output.decode("utf-8"))
+        self.assertEqual(data["corpus_size"], 2)
+        self.assertEqual({candidate["origin"] for candidate in data["candidates"]}, {"retrieved"})
 
     def test_cli_rejects_non_positive_limit(self):
         command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "湯気", "--B", "睡眠", "--limit", "0"]
