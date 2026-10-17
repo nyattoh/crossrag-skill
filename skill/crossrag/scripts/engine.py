@@ -109,6 +109,7 @@ def run(context, corpus=None, mode='orthogonal', novelty=0.55, coherence=0.8, li
     ctx=normalise(np.mean(anchors,axis=0))
     novelty=float(np.clip(novelty,0,1)); coherence=float(np.clip(coherence,0,1))
     rows=[]
+    raw_wedges=[]
     for i,((a,b,line),vec, pair) in enumerate(zip(corpus,candidate_vectors,pair_vectors)):
         sim=cosine(ctx,vec)
         # High coherence favours proximity; novelty favours novelty band vs pure maximum-distance
@@ -116,6 +117,7 @@ def run(context, corpus=None, mode='orthogonal', novelty=0.55, coherence=0.8, li
         band=1-abs(sim-target)/1.8
         orth=orthogonal_residual(vec,anchors)
         wedge=gram_bivector_cos(anchors[0],anchors[1],pair[0],pair[1])
+        raw_wedges.append(wedge)
         relevance=(sim+1)/2
         if mode=='similar': score=relevance
         elif mode=='orthogonal': score=0.42*band+0.38*orth+0.20*relevance*coherence
@@ -125,9 +127,9 @@ def run(context, corpus=None, mode='orthogonal', novelty=0.55, coherence=0.8, li
     rows.sort(key=lambda x:(-x['score'],x['index']))
     selected=rows[:int(np.clip(limit,1,20))]
     warnings=[]
-    # ponytail: wedge check only looks at the default-encoder degeneracy; no fix beyond reporting it
-    if mode=='wedge' and all(abs(r['wedge'])<1e-9 for r in rows):
-        warnings.append('wedge は全候補で0です。文脈の先頭2語が候補の語対と文字を共有せず、wedge の項が一定になっています。wedge の順位は類似度と帯域の順位と同じです。')
+    # ponytail: report the degenerate wedge term instead of fixing the encoder; checked on unrounded values over all candidates
+    if mode=='wedge' and all(abs(w)<1e-12 for w in raw_wedges):
+        warnings.append(f'wedge は全候補で0です（エンコーダ: {enc.name}）。wedge の項が順位に効いておらず、wedge の順位は類似度と帯域の順位と同じです。')
     return {'context':words,'mode':mode,'encoder':enc.name,'selected':selected,'total':len(corpus),'warnings':warnings,'note':'スコアは実験的なヒューリスティック。創作品質との相関は未検証。'}
 
 

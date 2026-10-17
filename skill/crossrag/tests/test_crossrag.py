@@ -19,6 +19,15 @@ class WedgeDegenerateTest(unittest.TestCase):
         self.assertTrue(all(abs(row['wedge']) < 1e-9 for row in result['selected']))
         self.assertTrue(any('wedge' in w for w in result['warnings']))
 
+    def test_warning_covers_all_candidates_not_only_selected(self):
+        result = run('犬、カレー、夕暮れ、帰宅', DEFAULT_CORPUS, 'wedge', 0.55, 0.8, 1, HashEncoder())
+        self.assertEqual(len(result['selected']), 1)
+        self.assertTrue(any('wedge' in w for w in result['warnings']))
+
+    def test_warning_names_the_encoder(self):
+        result = run('犬、カレー、夕暮れ、帰宅', DEFAULT_CORPUS, 'wedge', 0.55, 0.8, 5, HashEncoder())
+        self.assertIn(HashEncoder.name, result['warnings'][0])
+
     def test_no_warning_when_wedge_varies(self):
         corpus = [('犬', 'カレー', 'a'), ('カレー', '犬', 'b'), ('猫', '雨', 'c')]
         result = run('犬、カレー', corpus, 'wedge', 0.55, 0.8, 3, HashEncoder())
