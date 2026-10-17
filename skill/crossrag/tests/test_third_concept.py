@@ -118,6 +118,7 @@ class ExplorationContractTest(unittest.TestCase):
         self.assertTrue({"mode", "input", "encoder", "corpus_id", "corpus_size", "params", "origin_legend", "candidates", "warnings", "disclaimer"} <= data.keys())
         self.assertRegex(data["corpus_id"], r"^[0-9a-f]{16}$")
         self.assertTrue(data["disclaimer"])
+        self.assertEqual(data["params"]["vocab_size"], 0)
         required = {"id", "concept", "origin", "generation_method", "relation_to_A_alone", "relation_to_B_alone", "why_requires_AB", "uncertainty", "falsification_or_check", "scores", "source"}
         score_keys = {"s_A", "s_B", "plane_projection", "residual", "emergence_norm", "balance", "unexpectedness_h", "coherence_h", "score_third"}
         for candidate in data["candidates"]:
@@ -145,6 +146,26 @@ class ExplorationContractTest(unittest.TestCase):
         offline = explore("湯気", "睡眠", self.corpus, self.encoder, limit=5, corpus_path=self.corpus_path)
         self.assertFalse({"llm_hypothesis", "idea"} & {item["origin"] for item in offline["candidates"]})
         self.assertTrue(all(item["scores"]["llm_self_assessment"] is None for item in offline["candidates"] if item["origin"] in {"math", "retrieved"}))
+        hypotheses = {
+            "input": {"A": "湯気", "B": "睡眠"},
+            "generator": {"provider": "test", "model": "fake", "effort": "none", "prompt_sha256": "0", "date": "2026-10-18"},
+            "hypotheses": [{"concept": "夜間蒸気計", "kind": "llm_hypothesis", "explanation": "x", "relation_to_A_alone": "x", "relation_to_B_alone": "x", "why_requires_AB": "x", "uncertainty": "x", "falsification_or_check": "x", "llm_self_assessment": {"unexpectedness": 2, "coherence": 3, "emergence": 4, "testability": 5}}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hypotheses.json"
+            path.write_text(json.dumps(hypotheses, ensure_ascii=False), encoding="utf-8")
+            loaded = load_hypotheses(path, "湯気", "睡眠")
+            combined = explore("湯気", "睡眠", self.corpus, self.encoder, hypotheses=loaded, corpus_path=self.corpus_path)
+        llm_items = [item for item in combined["candidates"] if item["origin"] == "llm_hypothesis"]
+        self.assertEqual([item["concept"] for item in llm_items], ["夜間蒸気計"])
+        self.assertEqual(llm_items[0]["scores"]["llm_self_assessment"]["testability"], 5)
+
+    def test_no_center_changes_geometry_and_is_recorded(self):
+        centred = explore("湯気", "睡眠", self.corpus, self.encoder, limit=2, center=True, corpus_path=self.corpus_path)
+        raw = explore("湯気", "睡眠", self.corpus, self.encoder, limit=2, center=False, corpus_path=self.corpus_path)
+        self.assertTrue(centred["params"]["center"])
+        self.assertFalse(raw["params"]["center"])
+        self.assertNotEqual(centred["candidates"][0]["scores"]["heuristic_math"], raw["candidates"][0]["scores"]["heuristic_math"])
 
     def test_forbidden_claim_wording_is_absent(self):
         data = explore("湯気", "睡眠", self.corpus, self.encoder, limit=5, corpus_path=self.corpus_path)
