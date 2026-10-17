@@ -19,6 +19,13 @@ def positive_limit(value):
     return parsed
 
 
+def positive_null_samples(value):
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("null samples must be at least 1")
+    return parsed
+
+
 def read_corpus(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     # Any plain-text row routes the corpus to explore(), which validates every row; pair corpora keep the legacy loader.
@@ -37,6 +44,10 @@ def main():
     parser.add_argument("--model", default="intfloat/multilingual-e5-small")
     parser.add_argument("--limit", type=positive_limit, default=5)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument("--method", choices=("third-concept", "third-concept-ratio"), default="third-concept")
+    parser.add_argument("--p-min", type=float)
+    parser.add_argument("--null-samples", type=positive_null_samples, default=1000)
     parser.add_argument("--vocab")
     parser.add_argument("--hypotheses")
     parser.add_argument("--no-center", action="store_true")
@@ -56,11 +67,17 @@ def main():
                 raise ValueError("vocab must be a JSON string array")
         hypotheses = load_hypotheses(args.hypotheses, args.A, args.B) if args.hypotheses else None
         if args.emit_prompt:
-            result = explore(args.A, args.B, corpus, encoder, args.limit, args.seed, vocab, None, not args.no_center, args.corpus)
+            result = explore(
+                args.A, args.B, corpus, encoder, args.limit, args.seed, vocab, None, not args.no_center, args.corpus,
+                args.exclude, args.method, args.p_min, args.null_samples,
+            )
             math_candidates = [item for item in result["candidates"] if item["origin"] == "math"]
             print(build_hypothesis_prompt(args.A, args.B, math_candidates))
             return
-        result = explore(args.A, args.B, corpus, encoder, args.limit, args.seed, vocab, hypotheses, not args.no_center, args.corpus)
+        result = explore(
+            args.A, args.B, corpus, encoder, args.limit, args.seed, vocab, hypotheses, not args.no_center, args.corpus,
+            args.exclude, args.method, args.p_min, args.null_samples,
+        )
     except (ValueError, RuntimeError, ImportError, OSError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -26,6 +26,7 @@ SCORE_KEYS = (
 )
 SCORE_BY_METHOD = {
     "third-concept": "score_third",
+    "third-concept-ratio": "score_ratio",
     "third-concept-no-wedge": "score_no_wedge",
     "mean": "s_mean",
 }
@@ -89,8 +90,19 @@ def _centred_unit(vector, mu):
     return normalise(vector - mu) if mu is not None else normalise(vector)
 
 
-def geometry(a_vec, b_vec, c_vecs, mu=None):
+def _validated_p_min(p_min):
+    try:
+        value = float(p_min)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("p_min must be finite and between 0 and 1") from exc
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError("p_min must be finite and between 0 and 1")
+    return value
+
+
+def geometry(a_vec, b_vec, c_vecs, mu=None, p_min=0.0):
     """Return the design's geometric heuristic values for each candidate vector."""
+    p_min = _validated_p_min(p_min)
     mu_array = None if mu is None else np.asarray(mu, dtype=np.float64)
     a = _centred_unit(a_vec, mu_array)
     b = _centred_unit(b_vec, mu_array)
@@ -115,6 +127,17 @@ def geometry(a_vec, b_vec, c_vecs, mu=None):
         if not degenerate and s_a > 0.0 and s_b > 0.0:
             emergence = max(0.0, p_sq - max(s_a * s_a, s_b * s_b))
         emergence_norm = float(np.clip(emergence / upper_bound, 0.0, 1.0)) if upper_bound > 1e-12 else 0.0
+        between_ab = False
+        if not degenerate:
+            denominator = 1.0 - rho * rho
+            alpha = (s_a - rho * s_b) / denominator
+            beta = (s_b - rho * s_a) / denominator
+            between_ab = alpha >= -1e-12 and beta >= -1e-12 and p > 1e-12
+        emergence_ratio = 0.0
+        if between_ab and s_a > 0.0 and s_b > 0.0:
+            emergence_ratio = float(np.clip(1.0 - max(s_a * s_a, s_b * s_b) / p_sq, 0.0, 1.0))
+        emergence_ratio_norm = float(np.clip(emergence_ratio / upper_bound, 0.0, 1.0)) if upper_bound > 1e-12 else 0.0
+        p_below_min = p < p_min
         s_mean = float(np.clip(np.dot(c, mean_direction), -1.0, 1.0)) if np.linalg.norm(mean_direction) else 0.0
         # The in-plane projection must point towards A+B; a candidate opposed to both is not "half explained" by them.
         balance = float(np.clip(2.0 * p * residual, 0.0, 1.0)) if s_mean > 0.0 else 0.0
@@ -127,16 +150,55 @@ def geometry(a_vec, b_vec, c_vecs, mu=None):
                 "plane_projection": p,
                 "residual": residual,
                 "emergence_norm": emergence_norm,
+                "between_AB": bool(between_ab),
+                "emergence_ratio": emergence_ratio,
+                "emergence_ratio_norm": emergence_ratio_norm,
+                "p_below_min": bool(p_below_min),
                 "balance": balance,
                 "unexpectedness_h": unexpectedness,
                 "coherence_h": p,
                 "score_third": 0.5 * emergence_norm + 0.5 * balance,
+                "score_ratio": 0.5 * (0.0 if p_below_min else emergence_ratio_norm) + 0.5 * balance,
                 "s_mean": s_mean,
                 "score_no_wedge": score_no_wedge,
                 "warnings": [warning] if degenerate else [],
             }
         )
     return results
+
+
+def null_geometry(a_vec, b_vec, passage_vectors, mu, n=1000, seed=0):
+    if type(n) is not int or n < 1:
+        raise ValueError("n must be an integer at least 1")
+    passages = np.asarray(passage_vectors, dtype=np.float64)
+    if passages.size == 0:
+        raise ValueError("passage_vectors must not be empty")
+    passages = np.atleast_2d(passages)
+    mu_array = None if mu is None else np.asarray(mu, dtype=np.float64)
+    a = _centred_unit(a_vec, mu_array)
+    b = _centred_unit(b_vec, mu_array)
+    centred_passages = np.asarray([_centred_unit(vector, mu_array) for vector in passages])
+    dimension = a.shape[0]
+
+    random_rng = np.random.default_rng(seed)
+    random_vectors = np.asarray([normalise(vector) for vector in random_rng.standard_normal((n, dimension))])
+    shuffled_rng = np.random.default_rng(seed + 1)
+    shuffled_vectors = np.asarray(
+        [centred_passages[index % len(centred_passages)][shuffled_rng.permutation(dimension)] for index in range(n)]
+    )
+
+    result = {}
+    for name, vectors in (("random", random_vectors), ("shuffled", shuffled_vectors)):
+        rows = geometry(a, b, vectors, mu=None)
+        result[name] = {
+            "p": np.asarray([row["plane_projection"] for row in rows]),
+            "emergence_ratio": np.asarray([row["emergence_ratio"] for row in rows]),
+        }
+    return result
+
+
+def auto_p_min(null):
+    return float(np.percentile(null["shuffled"]["p"], 95))
 
 
 def is_plain_row(row):
@@ -204,32 +266,37 @@ def shared_geometry_space(A, B, corpus, encoder, vocab=None, center=True):
     }
 
 
-def _rank_vectors(a_vector, b_vector, candidate_vectors, method, limit, mu):
-    metrics = geometry(a_vector, b_vector, candidate_vectors, mu=mu)
+def _rank_vectors(a_vector, b_vector, candidate_vectors, method, limit, mu, p_min=0.0):
+    metrics = geometry(a_vector, b_vector, candidate_vectors, mu=mu, p_min=p_min)
     score_name = SCORE_BY_METHOD[method]
     order = sorted(range(len(metrics)), key=lambda index: (-metrics[index][score_name], index))
     return [(index, metrics[index]) for index in order[: max(0, int(limit))]]
 
 
-def rank_entries(A, B, corpus, encoder, method, limit, center=True, space=None, exclusion_inputs=None):
+def rank_entries(
+    A, B, corpus, encoder, method, limit, center=True, space=None, exclusion_inputs=None,
+    exclude=(), excluded=None, p_min=0.0,
+):
     if method not in SCORE_BY_METHOD:
         raise ValueError("unknown third-concept ranking method")
     if int(limit) < 1:
         raise ValueError("limit must be at least 1")
     space = space or shared_geometry_space(A, B, corpus, encoder, center=center)
     rows = space["rows"]
-    texts = space["passage_texts"]
     exclusion_a, exclusion_b = exclusion_inputs or (A, B)
-    cosine_excluded = _raw_cosine_exclusion_mask_from_vectors(
-        space["passage_vectors"], space["a_vector"], space["b_vector"]
-    )
+    if excluded is None:
+        excluded = exclusion_mask(space, exclusion_a, exclusion_b, exclude)
+    else:
+        excluded = list(excluded)
+        if len(excluded) != len(rows):
+            raise ValueError("excluded mask length must match corpus rows")
     ranked = []
     all_ranked = _rank_vectors(
-        space["a_vector"], space["b_vector"], space["passage_vectors"], method, len(rows), space["mu"]
+        space["a_vector"], space["b_vector"], space["passage_vectors"], method, len(rows), space["mu"], p_min
     )
     for index, scores in all_ranked:
         a, b, line = rows[index]
-        if any(_contains_input(value, exclusion_a, exclusion_b) for value in _row_values(rows[index])) or cosine_excluded[index]:
+        if excluded[index]:
             continue
         ranked.append({"index": index, "a": a, "b": b, "line": line, "score": scores[SCORE_BY_METHOD[method]], "scores": scores})
         if len(ranked) >= int(limit):
@@ -250,6 +317,23 @@ def _contains_input(candidate, A, B):
     return False
 
 
+def _normalised_exclude_terms(exclude):
+    terms = []
+    for term in exclude:
+        if not isinstance(term, str) or not term.strip():
+            raise ValueError("exclude terms must be non-empty strings")
+        normalised = _normalised_text(term)
+        if not normalised:
+            raise ValueError("exclude terms must be non-empty strings")
+        terms.append(normalised)
+    return terms
+
+
+def _contains_exclude(candidate, terms):
+    candidate_norm = _normalised_text(candidate)
+    return any(term in candidate_norm for term in terms)
+
+
 def _raw_cosine_exclusion_mask_from_vectors(vectors, a_vector, b_vector):
     unit_anchors = [normalise(a_vector), normalise(b_vector)]
     return [any(float(np.dot(normalise(vector), anchor)) >= 0.98 for anchor in unit_anchors) for vector in vectors]
@@ -263,8 +347,30 @@ def _raw_cosine_exclusion_mask(candidates, A, B, encoder, kind="query"):
     return _raw_cosine_exclusion_mask_from_vectors(vectors, anchors[0], anchors[1])
 
 
+def exclusion_mask(space, A, B, exclude=()):
+    terms = _normalised_exclude_terms(exclude)
+    cosine_excluded = _raw_cosine_exclusion_mask_from_vectors(
+        space["passage_vectors"], space["a_vector"], space["b_vector"]
+    )
+    return [
+        cosine_excluded[index]
+        or any(_contains_input(value, A, B) or _contains_exclude(value, terms) for value in _row_values(row))
+        for index, row in enumerate(space["rows"])
+    ]
+
+
 def _public_scores(scores):
     return {key: round(float(scores[key]), 6) for key in SCORE_KEYS}
+
+
+def _public_ratio_scores(scores):
+    return {
+        "emergence_ratio": round(float(scores["emergence_ratio"]), 6),
+        "emergence_ratio_norm": round(float(scores["emergence_ratio_norm"]), 6),
+        "score_ratio": round(float(scores["score_ratio"]), 6),
+        "between_AB": bool(scores["between_AB"]),
+        "p_below_min": bool(scores["p_below_min"]),
+    }
 
 
 def corpus_id(rows, path=None):
@@ -311,7 +417,11 @@ def _candidate(origin, number, concept, scores, generation_method, relation_a, r
         "why_requires_AB": why,
         "uncertainty": uncertainty,
         "falsification_or_check": check,
-        "scores": {"heuristic_math": _public_scores(scores), "llm_self_assessment": assessment},
+        "scores": {
+            "heuristic_math": _public_scores(scores),
+            "heuristic_ratio": _public_ratio_scores(scores),
+            "llm_self_assessment": assessment,
+        },
         "source": source,
     }
     if explanation is not None:
@@ -327,25 +437,42 @@ def _why_requires_ab(scores):
     return f"p²={p_sq:.3f} が単独最大 {single_sq:.3f} を上回る（emergence_norm={scores['emergence_norm']:.3f}）。意味的必然性は未検証"
 
 
-def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None, center=True, corpus_path=None):
+def explore(
+    A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None, center=True, corpus_path=None,
+    exclude=(), method="third-concept", p_min=None, null_samples=1000,
+):
     if int(limit) < 1:
         raise ValueError("limit must be at least 1")
+    if method not in {"third-concept", "third-concept-ratio"}:
+        raise ValueError("method must be 'third-concept' or 'third-concept-ratio'")
+    if type(null_samples) is not int or null_samples < 1:
+        raise ValueError("null_samples must be an integer at least 1")
+    exclude = list(exclude)
+    exclude_terms = _normalised_exclude_terms(exclude)
     space = shared_geometry_space(A, B, corpus, encoder, vocab=vocab, center=center)
     rows = space["rows"]
+    if p_min is None:
+        null = null_geometry(
+            space["a_vector"], space["b_vector"], space["passage_vectors"], space["mu"],
+            n=null_samples, seed=seed,
+        )
+        p_min = auto_p_min(null)
+        p_min_source = "auto:shuffled-p95"
+    else:
+        p_min = _validated_p_min(p_min)
+        p_min_source = "user"
     warnings = []
     excluded = 0
     candidates = []
 
     ranked_passages = _rank_vectors(
-        space["a_vector"], space["b_vector"], space["passage_vectors"], "third-concept", len(rows), space["mu"]
+        space["a_vector"], space["b_vector"], space["passage_vectors"], method, len(rows), space["mu"], p_min
     )
-    passage_cosine_excluded = _raw_cosine_exclusion_mask_from_vectors(
-        space["passage_vectors"], space["a_vector"], space["b_vector"]
-    )
+    passage_excluded = exclusion_mask(space, A, B, exclude)
     retrieved_number = 0
     for index, scores in ranked_passages:
         a, b, line = rows[index]
-        if any(_contains_input(value, A, B) for value in _row_values(rows[index])) or passage_cosine_excluded[index]:
+        if passage_excluded[index]:
             excluded += 1
             continue
         if retrieved_number < int(limit):
@@ -374,14 +501,15 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
     kept_pool = []
     kept_pool_vectors = []
     for value, vector, cosine_excluded in zip(pool, space["pool_vectors"], pool_cosine_excluded):
-        if _contains_input(value, A, B) or cosine_excluded:
+        if _contains_input(value, A, B) or _contains_exclude(value, exclude_terms) or cosine_excluded:
             excluded += 1
         else:
             kept_pool.append(value)
             kept_pool_vectors.append(vector)
     if kept_pool:
         ranked_math = _rank_vectors(
-            space["a_vector"], space["b_vector"], np.asarray(kept_pool_vectors), "third-concept", min(int(limit), len(kept_pool)), space["mu"]
+            space["a_vector"], space["b_vector"], np.asarray(kept_pool_vectors), method,
+            min(int(limit), len(kept_pool)), space["mu"], p_min
         )
         for number, (index, scores) in enumerate(ranked_math, 1):
             concept = kept_pool[index]
@@ -413,7 +541,7 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
         hypothesis_cosine_excluded = _raw_cosine_exclusion_mask([item["concept"] for item in hypothesis_items], A, B, encoder)
         for item, cosine_excluded in zip(hypothesis_items, hypothesis_cosine_excluded):
             concept = item["concept"]
-            if _contains_input(concept, A, B) or cosine_excluded:
+            if _contains_input(concept, A, B) or _contains_exclude(concept, exclude_terms) or cosine_excluded:
                 excluded += 1
                 warnings.append(f"入力概念と重なる仮説候補を除外した: {concept}")
             else:
@@ -422,14 +550,17 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
             texts = [item["concept"] for item in accepted]
             hypothesis_vectors = encoder.encode_query(texts)
             ranked = _rank_vectors(
-                space["a_vector"], space["b_vector"], hypothesis_vectors, "third-concept", len(texts), space["mu"]
+                space["a_vector"], space["b_vector"], hypothesis_vectors, method, len(texts), space["mu"], p_min
             )
             metrics_by_index = {index: scores for index, scores in ranked}
+            ordered = ranked if method == "third-concept-ratio" else [
+                (index, metrics_by_index[index]) for index in range(len(accepted))
+            ]
             counters = {"llm_hypothesis": 0, "idea": 0}
-            for index, item in enumerate(accepted):
+            for index, scores in ordered:
+                item = accepted[index]
                 origin = item["kind"]
                 counters[origin] += 1
-                scores = metrics_by_index[index]
                 candidates.append(
                     _candidate(
                         origin,
@@ -470,6 +601,11 @@ def explore(A, B, corpus, encoder, limit=5, seed=0, vocab=None, hypotheses=None,
             "excluded_inputs": excluded,
             "vocab_size": len(vocab or []),
             "hypotheses_sha256": hypotheses_sha,
+            "method": method,
+            "p_min": p_min,
+            "p_min_source": p_min_source,
+            "exclude": exclude,
+            "null_samples": null_samples,
         },
         "origin_legend": {
             "retrieved": "指定コーパス内の記述。内容の真偽は未確認。",
