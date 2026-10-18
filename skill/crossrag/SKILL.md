@@ -1,6 +1,8 @@
 ---
 name: crossrag
 description: Find experimental concept-corpus motifs for creative writing, surprising metaphors, copy, or cross-domain ideation, then use them as inspiration. Use when a user wants an unexpected connection or wants to compare similarity, orthogonal-residual, oriented wedge, random retrieval, or an experimental normal-ray search for concept sets. Runs local Python when available; retrieved motifs and scores are heuristic, not facts or proof.
+license: MIT
+compatibility: Requires Python 3.10+ and NumPy for local retrieval. Semantic mode additionally needs sentence-transformers and a locally available model.
 ---
 
 # CrossRAG
@@ -36,14 +38,16 @@ For exploration or research ideas, run `--mode discovery`. Present connections a
 
 ## Host compatibility
 
-Keep this directory intact when installing it. Codex, Gemini CLI, Grok Build, and Pi can discover the user-level `~/.agents/skills/crossrag/` location; Claude Code uses `~/.claude/skills/crossrag/`. The repository README has copy commands, host-specific activation examples, and links to current official discovery documentation. These paths are documented compatibility targets; live host recognition has not been tested here.
+Keep this directory intact when installing it; relative script and reference paths depend on that layout. Codex, Gemini CLI, Grok Build, and Pi support the shared user-level `~/.agents/skills/crossrag/` location. Claude Code uses `~/.claude/skills/crossrag/` and does not document `~/.agents/skills/` as a discovery root. `agents/openai.yaml` provides optional Codex UI metadata; the other hosts use `SKILL.md` and its supporting files.
+
+Use each host's own check and invocation when needed: Codex `/skills` then `$crossrag`; Claude Code `/skills` then `/crossrag`; Gemini CLI `gemini skills list` or `/skills list`, then ask in natural language for a task matching the description (the official CLI guide does not document per-skill slash invocation); Grok Build `/skills` then `/crossrag`; Pi `/skill:crossrag`. Reload changed skills with a Codex restart, Claude Code `/reload-skills` when a new top-level skills directory was added mid-session, Gemini `/skills reload`, or Pi `/reload`; Grok Build can be restarted if a new skill does not appear. These are documented discovery and activation methods, not a claim that every host runtime has been exercised.
 
 ## CLI
 
 ```bash
 python scripts/run.py --context '犬、カレー、夕暮れ、帰宅' --mode creative --method wedge --limit 5
 python scripts/run.py --context '記憶、法線、検索' --mode discovery --method orthogonal --limit 5
-python scripts/run.py --context '犬、カレー' --mode creative --method similar --encoder semantic
+python scripts/run.py --context '犬、カレー' --mode creative --method similar --encoder hash
 python scripts/run.py --context '犬、カレー' --corpus references/example-corpus.json
 ```
 
@@ -59,6 +63,6 @@ Use `python scripts/third_concept_cli.py --A 'concept A' --B 'concept B' --corpu
 
 ## normal-ray (experimental)
 
-Use `python scripts/third_concept_cli.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --encoder semantic --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-gap 0.25 --ray-min-set-size 2` to search for corpus concept and passage sets near one forward ray. By default, it fits three PCA components to corpus passage vectors centred on their own mean, projects A and B into them, computes their oriented cross product, and lifts the direction into the original embedding space. The ray starts at the midpoint of A and B after subtracting that same mean, and candidates are centred before distance checks. `--no-center` uses the embedding origin. Candidates must be at least `--ray-start-distance` along the ray and within `--ray-radius`; neighbouring axial positions are joined while their gap stays within `--ray-cluster-gap`. Sets smaller than `--ray-min-set-size` are omitted. `--limit` caps returned sets. The sign is a convention of the canonical PCA basis and A×B order; swapping A and B reverses it. An empty result is valid and does not trigger generated concepts.
+Use `python scripts/third_concept_cli.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-gap 0.25 --ray-min-set-size 2` to search for corpus concept and passage sets near one forward ray. By default, it fits three PCA components to corpus passage vectors centred on their own mean, projects A and B into them, computes their oriented cross product, and lifts the direction into the original embedding space. The ray starts at the midpoint of A and B after subtracting that same mean, and candidates are centred before distance checks. `--no-center` uses the embedding origin. Candidates must be at least `--ray-start-distance` along the ray and within `--ray-radius`; neighbouring axial positions are joined while their gap stays within `--ray-cluster-gap`. Sets smaller than `--ray-min-set-size` are omitted. `--limit` caps returned sets. The sign is a convention of the canonical PCA basis and A×B order; swapping A and B reverses it. An empty result is valid and does not trigger generated concepts. Distances are not calibrated across encoders; use semantic mode only when the model is already available locally or setup is authorised.
 
 This gives one reproducible ray by selecting a corpus-dependent three-dimensional frame. The output includes the centring vector used so the ray can be mapped back to the encoder coordinates. PCA is fit on all corpus passages, including passages later removed from returned results by `--exclude`; the candidates are not refit after filtering. Query and passage prefixes may place the two encoder pathways in slightly different spaces, so concept and passage sets should be compared cautiously with prefixed encoders. Near-tied leading PCA components can change the chosen ray when the corpus changes, even when the component sign pivots themselves look stable. A and B alone still do not determine a unique normal in the full embedding space. A hit indicates geometric proximity only, not semantic relatedness, novelty, or usefulness. Compare the ray against synthetic controls before treating any set as a meaningful connection.
