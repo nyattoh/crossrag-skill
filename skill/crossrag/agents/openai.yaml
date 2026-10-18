@@ -1,3 +1,4 @@
 interface:
   display_name: "CrossRAG"
-  short_description: "創作と発見のための幾何学的な寄り道検索"
+  short_description: "発想の候補を検索し、文章や仮説の材料にする"
+  default_prompt: "CrossRAGで「〇〇」と「〇〇」から発想の候補を検索し、着想として使った短い文章案を作って。候補を事実の根拠として扱わないで。"

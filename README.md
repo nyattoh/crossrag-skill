@@ -1,8 +1,8 @@
 # CrossRAG
 
-創作と発見のための、実験的な幾何学検索スキルです。既存の概念コーパスに対して、類似・直交残差・向き付き楔積（外積）・ランダムの4通りで候補を取り出し、同じ条件で比べられます。
+CrossRAGは、入力した概念から既存コーパスのモチーフを複数の数値的な見方で取り出し、文章やアイデアを考えるモデルへ別の出発点を渡す実験的なスキルです。検索を実行するのはローカルのPython、最終的な文章を書くのはスキルを使うホスト側のモデルです。
 
-検索はローカルの Python が数値で行います。文章を書くのは、結果を受け取った側のモデルです。楔積そのものが文章を生成するわけではなく、創造性が向上したという証明にもなりません。
+使う価値は、同じ問いを「似ているもの」「文脈と異なる方向」「概念ペアの向き」などで見直し、発想の材料を増やせることです。これは発想支援の候補検索であり、事実確認、因果関係の発見、創造性や通常のRAGに対する優位性を保証しません。
 
 ## アーキテクチャ
 
@@ -36,7 +36,23 @@ skill/crossrag/
 - 分野をまたいだ着想や、変わった研究上のつながりを出すとき
 - 同じコーパスで、類似検索と楔積検索の出方を比べるとき
 
-事実の裏取りには使いません。取り出したモチーフは着想であり、証拠でも、そのまま写す文でもありません。順位はヒューリスティックで、通常の RAG より優れていることは示しません。
+事実の裏取りには使いません。取り出したモチーフは着想であり、証拠でも、そのまま写す文でもありません。順位はヒューリスティックで、通常のRAGより優れていることは示しません。
+
+## まず一度使う
+
+リポジトリのルートで、必要な依存関係を一度だけ入れます。
+
+```powershell
+python -m pip install -r skill/crossrag/requirements.txt
+Set-Location skill/crossrag
+python scripts/run.py --context "犬、カレー、夕暮れ" --method similar
+```
+
+この最短コマンドは、同梱の22件の日本語例コーパスとオフラインの文字n-gram hashで、類似度による順位を5件返します。JSONの`selected`に含まれる`line`が文章や発想の材料です。`hash`は意味を理解する埋め込みではなく、例コーパスも小さいため、実際の領域には自分のコーパスを指定してください。候補やスコアは事実の根拠ではありません。
+
+`wedge`は既定の方式ですが、hashと短い語の組み合わせでは全候補のwedge成分が0になる場合があります。そのときは出力の`warnings`を読み、wedgeが順位に寄与していないことを明記してください。異なる方式を比べる場合は同じコーパス・エンコーダを使い、方式名だけで性能差を主張しないでください。
+
+スキル対応ホストでは、たとえば「CrossRAGを使って、犬・カレー・夕暮れから一つの意外な関係を選び、短い物語を書いて。検索された文は写さないで」と依頼します。ホスト側のモデルがスキルを読み、検索を実行してから文章を作ります。調査の着想がほしい場合は、発見モードで候補を3つ、つながり・不確実性・確かめる最小テストとともに示すよう依頼します。
 
 ## 準備
 
@@ -60,7 +76,7 @@ python scripts/run.py --context "犬、カレー" --mode creative --method simil
 python scripts/run.py --context "犬、カレー" --corpus references/example-corpus.json
 ```
 
-標準出力は UTF-8 の JSON です。各候補に `cosine`、`orthogonal`、`wedge` と、選んだ手法の順位が入ります。
+標準出力はUTF-8のJSONです。各候補に`cosine`、`orthogonal`、`wedge`と、選んだ手法の順位が入ります。`--mode`はホスト側モデルへ渡す創作・発見の指示、`--method`は候補を並べる数値方式を切り替えます。
 
 | オプション | 意味 |
 | --- | --- |
@@ -84,15 +100,45 @@ python scripts/run.py --context "犬、カレー" --corpus references/example-co
 
 式、限界、評価の置き方は [methodology.md](skill/crossrag/references/methodology.md)、創作と発見の出力の型は [modes.md](skill/crossrag/references/modes.md) にあります。
 
-## エージェントへの入れ方
+## 各ホストへの入れ方
 
-`skill/crossrag` を、ホストのスキルディレクトリへフォルダごと置きます。相対パス（`scripts/` と `references/`）を保つため、中だけをばらして置かないでください。
+配布・実行単位は`skill/crossrag`フォルダー全体です。`SKILL.md`だけを移さず、`scripts/`、`references/`、`requirements.txt`との相対位置を保ってください。ユーザー領域では、Codex・Gemini CLI・Grok Build・Piが共通して認識する`~/.agents/skills/crossrag`へ置けます。Claude Codeは`~/.claude/skills/crossrag`にも同じフォルダーが必要です。
 
-スキルは実行できるとき、楔積と類似を同じコーパスで取り、そのモチーフを着想として文章または仮説にします。スクリプトが動かないときは、数学的な検索をしたと書かず、言語だけの下書きだと明示します。
+リポジトリのルートからPowerShellで配置する例:
+
+```powershell
+$shared = Join-Path $HOME ".agents\skills\crossrag"
+$claude = Join-Path $HOME ".claude\skills\crossrag"
+New-Item -ItemType Directory -Force -Path $shared, $claude | Out-Null
+Copy-Item -Path .\skill\crossrag\* -Destination $shared -Recurse -Force
+Copy-Item -Path .\skill\crossrag\* -Destination $claude -Recurse -Force
+```
+
+macOS/Linuxでの例:
+
+```bash
+mkdir -p "$HOME/.agents/skills/crossrag" "$HOME/.claude/skills/crossrag"
+cp -R skill/crossrag/. "$HOME/.agents/skills/crossrag/"
+cp -R skill/crossrag/. "$HOME/.claude/skills/crossrag/"
+```
+
+| ホスト | ユーザー領域の配置先 | 認識確認・明示起動 |
+| --- | --- | --- |
+| Codex | `~/.agents/skills/crossrag/` | `/skills`で一覧、`$crossrag`で明示指定 |
+| Claude Code | `~/.claude/skills/crossrag/` | `/crossrag`で明示起動 |
+| Gemini CLI | `~/.agents/skills/crossrag/` または `~/.gemini/skills/crossrag/` | `/skills list`、必要なら`/skills reload` |
+| Grok Build | `~/.agents/skills/crossrag/` または `~/.grok/skills/crossrag/` | `/skills`で一覧、`/crossrag`で明示起動 |
+| Pi | `~/.agents/skills/crossrag/` または `~/.pi/agent/skills/crossrag/` | `/skill:crossrag`で明示起動 |
+
+スキルを追加した後に一覧へ出ない場合は、ホストの再読込み・再起動方法を使ってください。プロジェクト単位に置く場合はホストごとに探索先が異なるため、各公式資料を確認してください。上表は配置形式の案内であり、実機でのスキル認識・実行を検証したという意味ではありません。
+
+スクリプトを実行できないときは検索を実行したと装わず、必要なセットアップを伝えてください。言語だけで下書きする場合も、数値検索による候補を使っていないことを明示します。
 
 ## 出典
 
-検索本体は CrossRAG Lab v0.1 を基にした研究プロトタイプです。背景として [Geometric Deep Learning](https://arxiv.org/abs/1603.09320) と [Sentence-Transformers の類似度](https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html) を参照しています。
+検索本体はCrossRAG Lab v0.1を基にした研究プロトタイプです。背景として[Geometric Deep Learning](https://arxiv.org/abs/1603.09320)と[Sentence-Transformersの類似度](https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html)を参照しています。
+
+各ホストの探索場所と起動方法は変わることがあるため、利用前に公式資料も確認してください: [Codex](https://developers.openai.com/codex/skills)、[Claude Code](https://code.claude.com/docs/en/skills)、[Gemini CLI](https://geminicli.com/docs/cli/using-agent-skills/)、[Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces)、[Pi](https://pi.dev/docs/latest/skills)。
 
 ## ライセンス
 
