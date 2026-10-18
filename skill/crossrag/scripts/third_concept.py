@@ -389,6 +389,236 @@ def shared_geometry_space(A, B, corpus, encoder, vocab=None, center=True):
     }
 
 
+def fit_ray_frame(a_vec, b_vec, reference_vectors, *, center=True):
+    """Choose one corpus-PCA normal ray and lift it to the embedding space.
+
+    The 3D PCA frame is a deterministic convention for selecting one ray from
+    the many directions orthogonal to span(A, B). It is corpus-dependent and
+    does not make the selected direction a semantic fact.
+    """
+    references = np.asarray(reference_vectors, dtype=np.float64)
+    if references.ndim != 2 or references.shape[0] < 3 or references.shape[1] < 3:
+        return {"status": "unavailable", "reason": "reference_requires_at_least_three_rows_and_dimensions"}
+    a = np.asarray(a_vec, dtype=np.float64)
+    b = np.asarray(b_vec, dtype=np.float64)
+    if a.ndim != 1 or b.ndim != 1 or a.shape != b.shape or a.shape[0] != references.shape[1]:
+        raise ValueError("A, B and reference vectors must share one embedding dimension")
+    if not np.isfinite(references).all() or not np.isfinite(a).all() or not np.isfinite(b).all():
+        raise ValueError("ray inputs must be finite")
+
+    if center:
+        pca_center = np.mean(references, axis=0)
+        center_source = "corpus_passage_mean"
+    else:
+        pca_center = np.zeros(references.shape[1], dtype=np.float64)
+        center_source = "embedding_origin"
+    centered_references = references - pca_center
+    covariance = centered_references.T @ centered_references
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = np.maximum(eigenvalues[order], 0.0)
+    singular_values = np.sqrt(eigenvalues)
+    rank_tolerance = max(float(singular_values[0]) * 1e-12, 1e-15) if len(singular_values) else 1e-15
+    if len(singular_values) < 3 or singular_values[2] <= rank_tolerance:
+        return {"status": "unavailable", "reason": "reference_rank_below_three"}
+    third_to_first = float(singular_values[2] / singular_values[0]) if singular_values[0] else 0.0
+    if third_to_first < 0.01:
+        return {
+            "status": "unavailable",
+            "reason": "third_pca_component_too_weak",
+            "pca_third_to_first_singular_ratio": third_to_first,
+        }
+
+    basis = eigenvectors[:, order[:3]].T.copy()
+    # Eigenvector signs are arbitrary; fix each sign for repeatable ray orientation.
+    # A small pivot margin means small corpus changes may reverse a component.
+    pivot_margins = []
+    for component in basis:
+        magnitudes = np.sort(np.abs(component))
+        pivot = int(np.argmax(np.abs(component)))
+        pivot_margins.append(float((magnitudes[-1] - magnitudes[-2]) / max(magnitudes[-1], 1e-15)))
+        if component[pivot] < 0.0:
+            component *= -1.0
+
+    a_centered = a - pca_center
+    b_centered = b - pca_center
+    a_norm = float(np.linalg.norm(a_centered))
+    b_norm = float(np.linalg.norm(b_centered))
+    if a_norm <= 1e-15 or b_norm <= 1e-15:
+        return {"status": "unavailable", "reason": "anchor_zero_after_centering", "pca_center": pca_center.tolist()}
+    a_projected = basis @ a_centered
+    b_projected = basis @ b_centered
+    a_projection_norm = float(np.linalg.norm(a_projected))
+    b_projection_norm = float(np.linalg.norm(b_projected))
+    a_projection_energy = (a_projection_norm / a_norm) ** 2
+    b_projection_energy = (b_projection_norm / b_norm) ** 2
+    if min(a_projection_energy, b_projection_energy) < 0.01:
+        return {
+            "status": "unavailable",
+            "reason": "anchor_projection_energy_too_low",
+            "pca_center": pca_center.tolist(),
+            "anchor_projection_energy": {"A": a_projection_energy, "B": b_projection_energy},
+        }
+    a_projected /= a_projection_norm
+    b_projected /= b_projection_norm
+    cross = np.cross(a_projected, b_projected)
+    cross_norm = float(np.linalg.norm(cross))
+    if cross_norm <= 1e-6:
+        return {
+            "status": "unavailable",
+            "reason": "projected_anchors_collinear",
+            "pca_center": pca_center.tolist(),
+            "projected_anchor_sine": cross_norm,
+        }
+
+    direction = normalise(basis.T @ (cross / cross_norm))
+    origin = (a_centered + b_centered) / 2.0
+    total_variance = float(np.sum(singular_values ** 2))
+    explained = singular_values[:3] ** 2 / total_variance if total_variance else np.zeros(3)
+    warnings = []
+    leading_gaps = [
+        float((singular_values[index] - singular_values[index + 1]) / singular_values[index])
+        if singular_values[index] > 0.0 else 0.0
+        for index in range(2)
+    ]
+    if min(leading_gaps) < 0.05:
+        warnings.append("PCA 上位3成分の特異値が近く、成分順の変化で光線の向きが変わる可能性がある。")
+    if min(pivot_margins) < 0.05:
+        warnings.append("PCA 軸の符号を決める最大座標が同程度で、コーパスの微小変化により光線の向きが反転する可能性がある。")
+    if len(singular_values) > 3 and singular_values[2] > 0.0:
+        cutoff_gap = float((singular_values[2] - singular_values[3]) / singular_values[2])
+        if cutoff_gap < 0.05:
+            warnings.append("PCA の第3・第4成分が近く、光線方向はコーパスの微小変化に敏感な可能性がある。")
+    else:
+        cutoff_gap = None
+    return {
+        "status": "available",
+        "method": "global_corpus_pca_3d_lift" if center else "global_corpus_uncentred_pca_3d_lift",
+        "orientation": "canonical_PCA_basis_A_cross_B",
+        "origin_rule": "centered_anchor_midpoint" if center else "anchor_midpoint_at_embedding_origin",
+        "origin": origin.tolist(),
+        "direction": direction.tolist(),
+        "pca_center": pca_center.tolist(),
+        "dimension": int(references.shape[1]),
+        "center_source": center_source,
+        "pca_axis_sign_pivot_margins": pivot_margins,
+        "pca_leading_component_relative_gaps": leading_gaps,
+        "anchor_projection_energy": {"A": a_projection_energy, "B": b_projection_energy},
+        "projected_anchor_sine": cross_norm,
+        "pca_third_to_second_singular_ratio": float(singular_values[2] / singular_values[1]) if singular_values[1] else 0.0,
+        "pca_explained_variance_ratio": explained.tolist(),
+        "pca_cutoff_relative_gap": cutoff_gap,
+        "warnings": warnings,
+    }
+
+
+def search_ray_sets(
+    ray_frame, candidate_vectors, labels, *, radius=0.25, start_distance=0.25,
+    cluster_gap=0.25, min_set_size=2, max_sets=None,
+):
+    """Return items inside a forward ray tube, joining neighbours by axial gaps."""
+    try:
+        radius, start_distance, cluster_gap = float(radius), float(start_distance), float(cluster_gap)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ray radius, start distance and cluster gap must be finite numbers") from exc
+    if not math.isfinite(radius) or radius <= 0.0:
+        raise ValueError("ray radius must be finite and positive")
+    if not math.isfinite(start_distance) or start_distance < 0.0:
+        raise ValueError("ray start distance must be finite and non-negative")
+    if not math.isfinite(cluster_gap) or cluster_gap <= 0.0:
+        raise ValueError("ray cluster gap must be finite and positive")
+    if type(min_set_size) is not int or min_set_size < 1:
+        raise ValueError("minimum set size must be an integer at least 1")
+    if max_sets is not None and (type(max_sets) is not int or max_sets < 1):
+        raise ValueError("maximum set count must be an integer at least 1")
+    if ray_frame.get("status") != "available":
+        return {
+            "status": "unavailable", "reason": ray_frame.get("reason"),
+            "radius": radius, "start_distance": start_distance, "cluster_gap": cluster_gap,
+            "min_set_size": min_set_size, "max_sets": max_sets,
+            "near_ray_count": 0, "truncated_set_count": 0, "sets": [],
+        }
+
+    direction = np.asarray(ray_frame["direction"], dtype=np.float64)
+    origin = np.asarray(ray_frame["origin"], dtype=np.float64)
+    pca_center = np.asarray(ray_frame["pca_center"], dtype=np.float64)
+    vectors = np.asarray(candidate_vectors, dtype=np.float64)
+    labels = list(labels)
+    if vectors.size == 0:
+        if labels:
+            raise ValueError("labels length must match candidate vectors")
+        vectors = np.empty((0, len(direction)), dtype=np.float64)
+    elif vectors.ndim == 1:
+        vectors = vectors[None, :]
+    if vectors.shape[0] != len(labels):
+        raise ValueError("labels length must match candidate vectors")
+    if vectors.shape[1:] != direction.shape or origin.shape != direction.shape or pca_center.shape != direction.shape:
+        raise ValueError("candidate vectors and ray frame must share one embedding dimension")
+    if not np.isfinite(vectors).all():
+        raise ValueError("candidate vectors must be finite")
+
+    # The origin is centred; express candidates in the same centred frame.
+    offsets = (vectors - pca_center) - origin
+    axial = offsets @ direction
+    radial_vectors = offsets - axial[:, None] * direction
+    radial = np.linalg.norm(radial_vectors, axis=1)
+    eligible = [
+        index for index, (t, distance) in enumerate(zip(axial, radial))
+        if t >= start_distance and distance <= radius
+    ]
+    ordered = sorted(eligible, key=lambda index: (float(axial[index]), index))
+    groups = []
+    current = []
+    for index in ordered:
+        if current and float(axial[index] - axial[current[-1]]) > cluster_gap:
+            groups.append(current)
+            current = []
+        current.append(index)
+    if current:
+        groups.append(current)
+
+    all_sets = []
+    for indices in groups:
+        if len(indices) < min_set_size:
+            continue
+        items = []
+        for index in sorted(indices, key=lambda i: (float(radial[i]), i)):
+            label = labels[index]
+            item = {
+                "candidate_index": index,
+                "source_index": label.get("corpus_index", label.get("pool_index", index)) if isinstance(label, dict) else index,
+                "axial_distance": float(axial[index]),
+                "radial_distance": float(radial[index]),
+            }
+            if isinstance(label, dict):
+                item["label"] = label.get("line") or label.get("concept") or str(index)
+                item["source"] = label
+            else:
+                item["label"] = str(label)
+            items.append(item)
+        all_sets.append({
+            "t_start": float(min(axial[index] for index in indices)),
+            "t_end": float(max(axial[index] for index in indices)),
+            "count": len(items),
+            "mean_radial_distance": float(np.mean([item["radial_distance"] for item in items])),
+            "items": items,
+        })
+    truncated_set_count = max(0, len(all_sets) - max_sets) if max_sets is not None else 0
+    sets = all_sets[:max_sets] if max_sets is not None else all_sets
+    return {
+        "status": "sets_found" if sets else "no_sets",
+        "radius": radius,
+        "start_distance": start_distance,
+        "cluster_gap": cluster_gap,
+        "min_set_size": min_set_size,
+        "max_sets": max_sets,
+        "near_ray_count": len(eligible),
+        "discarded_unclustered_count": len(eligible) - sum(item["count"] for item in all_sets),
+        "truncated_set_count": truncated_set_count,
+        "sets": sets,
+    }
+
+
 def _rank_vectors(a_vector, b_vector, candidate_vectors, method, limit, mu, p_min=0.0):
     metrics = geometry(a_vector, b_vector, candidate_vectors, mu=mu, p_min=p_min)
     score_name = SCORE_BY_METHOD[method]
@@ -739,6 +969,92 @@ def explore(
         "candidates": candidates,
         "warnings": warnings,
         "disclaimer": "すべての候補は未検証。retrieved はコーパス内の存在のみ、math は埋め込み空間上の位置のみ、llm_hypothesis / idea は LLM の推論であり、いずれも事実・発見として扱わない。",
+    }
+
+
+def explore_ray(
+    A, B, corpus, encoder, vocab=None, center=True, corpus_path=None, exclude=(),
+    radius=0.25, start_distance=0.25, cluster_gap=0.25, min_set_size=2, max_sets=5,
+):
+    """Search for corpus concepts and passages near one lifted PCA-normal ray."""
+    rows = _rows(corpus)
+    exclude = list(exclude)
+    exclude_terms = _normalised_exclude_terms(exclude)
+    space = shared_geometry_space(A, B, rows, encoder, vocab=vocab, center=center)
+    frame = fit_ray_frame(
+        space["a_vector"], space["b_vector"], space["passage_vectors"], center=center,
+    )
+
+    pool_excluded_cosine = _raw_cosine_exclusion_mask_from_vectors(
+        space["pool_vectors"], space["a_vector"], space["b_vector"]
+    ) if len(space["pool"]) else []
+    concept_indices = [
+        index for index, (concept, cosine_excluded) in enumerate(zip(space["pool"], pool_excluded_cosine))
+        if not cosine_excluded and not _contains_input(concept, A, B) and not _contains_exclude(concept, exclude_terms)
+    ]
+    dimension = len(space["a_vector"])
+    concept_vectors = (
+        space["pool_vectors"][concept_indices]
+        if concept_indices else np.empty((0, dimension), dtype=np.float64)
+    )
+    concept_labels = [{"concept": space["pool"][index], "pool_index": index} for index in concept_indices]
+    concept_sets = search_ray_sets(
+        frame, concept_vectors, concept_labels,
+        radius=radius, start_distance=start_distance, cluster_gap=cluster_gap,
+        min_set_size=min_set_size, max_sets=max_sets,
+    )
+
+    passage_excluded = exclusion_mask(space, A, B, exclude)
+    passage_indices = [index for index, excluded in enumerate(passage_excluded) if not excluded]
+    passage_vectors = (
+        space["passage_vectors"][passage_indices]
+        if passage_indices else np.empty((0, dimension), dtype=np.float64)
+    )
+    passage_labels = [
+        {"corpus_index": index, "a": rows[index][0], "b": rows[index][1], "line": rows[index][2]}
+        for index in passage_indices
+    ]
+    passage_sets = search_ray_sets(
+        frame, passage_vectors, passage_labels,
+        radius=radius, start_distance=start_distance, cluster_gap=cluster_gap,
+        min_set_size=min_set_size, max_sets=max_sets,
+    )
+
+    if frame["status"] != "available":
+        status = "ray_unavailable"
+    elif concept_sets["sets"] or passage_sets["sets"]:
+        status = "sets_found"
+    else:
+        status = "no_sets"
+    public_ray = dict(frame)
+    public_ray["coordinates"] = "corpus_passage_centered" if center else "uncentered_embedding"
+    return {
+        "mode": "normal-ray",
+        "status": status,
+        "input": {"A": A, "B": B},
+        "encoder": {
+            "name": encoder.name,
+            "model_id": encoder.model_id,
+            "prefix": encoder.prefix,
+        },
+        "corpus_id": corpus_id(rows, corpus_path),
+        "corpus_size": len(rows),
+        "params": {
+            "projection": frame.get("method"),
+            "origin": "centered_anchor_midpoint" if center else "anchor_midpoint_at_embedding_origin",
+            "radius": radius,
+            "start_distance": start_distance,
+            "cluster_gap": cluster_gap,
+            "min_set_size": min_set_size,
+            "max_sets": max_sets,
+            "center": bool(center),
+            "exclude": exclude,
+        },
+        "ray": public_ray,
+        "concept_sets": concept_sets,
+        "passage_sets": passage_sets,
+        "warnings": frame.get("warnings", []),
+        "disclaimer": "集合は指定コーパス内で光線近傍にある埋め込みのまとまり。意味的な関連、新規性、有用性を証明するものではない。集合がない場合は no_sets を返す。",
     }
 
 
