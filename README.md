@@ -20,14 +20,19 @@ CrossRAGは、入力した概念から既存コーパスのモチーフを複数
 
 ```text
 skill/crossrag/
+  LICENSE
   SKILL.md
   requirements.txt
   agents/openai.yaml
   scripts/run.py        # CLI
   scripts/engine.py     # 検索本体
+  scripts/third_concept.py
+  scripts/third_concept_cli.py
+  scripts/compare_third_concept.py
   references/methodology.md
   references/modes.md
   references/example-corpus.json
+  tests/                # 回帰テストと合成fixture
 ```
 
 ## 何に使うか
@@ -56,11 +61,21 @@ python scripts/run.py --context "犬、カレー、夕暮れ" --method similar
 
 ## 準備
 
-Python 3 と NumPy が必要です。既定のハッシュエンコーダはオフラインで動きます。これは文字 n-gram の特徴ベクトルであり、意味埋め込みではありません。
+Python 3.10 以上と NumPy が必要です。既定のハッシュエンコーダはオフラインで動きます。これは文字 n-gram の特徴ベクトルであり、意味埋め込みではありません。OS管理下のPython環境では仮想環境を使ってください。
 
 ```powershell
 python -m pip install -r skill/crossrag/requirements.txt
 ```
+
+macOS/Linuxでは、たとえば次のように仮想環境を使えます。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r skill/crossrag/requirements.txt
+```
+
+macOS/Linuxで`python`がPython 3.10以上を指さない場合は、`python3`で仮想環境を作成・有効化してから依存を入れてください。管理されたPython環境がpipによる直接インストールを拒否する場合も、仮想環境を使います。
 
 意味埋め込みを使う場合だけ、別途 `sentence-transformers` とモデルがローカルに必要です。初回はモデルのダウンロードが走ります。`--encoder semantic` を付けない限り、ネットワークも有料 API も使いません。
 
@@ -72,9 +87,19 @@ python -m pip install -r skill/crossrag/requirements.txt
 Set-Location skill/crossrag
 python scripts/run.py --context "犬、カレー、夕暮れ、帰宅" --mode creative --method wedge --limit 5
 python scripts/run.py --context "記憶、法線、検索" --mode discovery --method orthogonal --limit 5
-python scripts/run.py --context "犬、カレー" --mode creative --method similar --encoder semantic
+python scripts/run.py --context "犬、カレー" --mode creative --method similar --encoder hash
 python scripts/run.py --context "犬、カレー" --corpus references/example-corpus.json
 ```
+
+`--corpus`に相対パスを渡す場合は、`skill/crossrag`からの相対パスになります。リポジトリ外のユーザーコーパスには絶対パスを使ってください。`--encoder semantic`はsentence-transformersとモデルをローカルに用意した場合だけ指定します。
+
+To inspect corpus sets near one PCA-selected ray from an A/B plane, use the experimental normal-ray CLI:
+
+```powershell
+python scripts/third_concept_cli.py --A "概念A" --B "概念B" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-gap 0.25 --ray-min-set-size 2
+```
+
+コーパス記述の平均を基準に選んだ3次元PCA枠でA/Bの張る面に直交する一本の光線を定め、その近傍の概念・記述を軸方向の集合として返します。光線の向きはPCA基底とA×Bの順で決まる規約で、A/Bを入れ替えると反転します。意味的関連は判定しません。無関係な項目でも幾何条件に合えば返し、条件に合う実在項目がなければ空集合になります。出力にはコーパスの出典情報を保持します。距離の既定値はエンコーダ間で較正されていないため、semanticモードはモデルがローカルにある場合に限って使ってください。
 
 標準出力はUTF-8のJSONです。各候補に`cosine`、`orthogonal`、`wedge`と、選んだ手法の順位が入ります。`--mode`はホスト側モデルへ渡す創作・発見の指示、`--method`は候補を並べる数値方式を切り替えます。
 
@@ -102,7 +127,7 @@ python scripts/run.py --context "犬、カレー" --corpus references/example-co
 
 ## 各ホストへの入れ方
 
-配布・実行単位は`skill/crossrag`フォルダー全体です。`SKILL.md`だけを移さず、`scripts/`、`references/`、`requirements.txt`との相対位置を保ってください。ユーザー領域では、Codex・Gemini CLI・Grok Build・Piが共通して認識する`~/.agents/skills/crossrag`へ置けます。Claude Codeは`~/.claude/skills/crossrag`にも同じフォルダーが必要です。
+配布・実行単位は`skill/crossrag`フォルダー全体です。`SKILL.md`だけを移さず、`scripts/`、`references/`、`requirements.txt`、`LICENSE`との相対位置を保ってください。Codex・Gemini CLI・Grok Build・Piのユーザー共通パスは`~/.agents/skills/crossrag`です。Claude Codeのユーザーパスは`~/.claude/skills/crossrag`で、`.agents/skills`は探索先に含まれません。Codex向けの`agents/openai.yaml`はCodex UI用の任意メタデータです。
 
 リポジトリのルートからPowerShellで配置する例:
 
@@ -110,27 +135,31 @@ python scripts/run.py --context "犬、カレー" --corpus references/example-co
 $shared = Join-Path $HOME ".agents\skills\crossrag"
 $claude = Join-Path $HOME ".claude\skills\crossrag"
 New-Item -ItemType Directory -Force -Path $shared, $claude | Out-Null
-Copy-Item -Path .\skill\crossrag\* -Destination $shared -Recurse -Force
-Copy-Item -Path .\skill\crossrag\* -Destination $claude -Recurse -Force
+robocopy .\skill\crossrag $shared /E /XD .ruff_cache __pycache__ .pytest_cache
+if ($LASTEXITCODE -ge 8) { throw "CrossRAG shared install failed: $LASTEXITCODE" }
+robocopy .\skill\crossrag $claude /E /XD .ruff_cache __pycache__ .pytest_cache
+if ($LASTEXITCODE -ge 8) { throw "CrossRAG Claude install failed: $LASTEXITCODE" }
 ```
 
 macOS/Linuxでの例:
 
 ```bash
 mkdir -p "$HOME/.agents/skills/crossrag" "$HOME/.claude/skills/crossrag"
-cp -R skill/crossrag/. "$HOME/.agents/skills/crossrag/"
-cp -R skill/crossrag/. "$HOME/.claude/skills/crossrag/"
+rsync -a --exclude='.ruff_cache/' --exclude='__pycache__/' --exclude='.pytest_cache/' skill/crossrag/ "$HOME/.agents/skills/crossrag/"
+rsync -a --exclude='.ruff_cache/' --exclude='__pycache__/' --exclude='.pytest_cache/' skill/crossrag/ "$HOME/.claude/skills/crossrag/"
 ```
 
 | ホスト | ユーザー領域の配置先 | 認識確認・明示起動 |
 | --- | --- | --- |
-| Codex | `~/.agents/skills/crossrag/` | `/skills`で一覧、`$crossrag`で明示指定 |
-| Claude Code | `~/.claude/skills/crossrag/` | `/crossrag`で明示起動 |
-| Gemini CLI | `~/.agents/skills/crossrag/` または `~/.gemini/skills/crossrag/` | `/skills list`、必要なら`/skills reload` |
-| Grok Build | `~/.agents/skills/crossrag/` または `~/.grok/skills/crossrag/` | `/skills`で一覧、`/crossrag`で明示起動 |
-| Pi | `~/.agents/skills/crossrag/` または `~/.pi/agent/skills/crossrag/` | `/skill:crossrag`で明示起動 |
+| Codex | `~/.agents/skills/crossrag/` | `/skills`で一覧、`$crossrag`で明示起動。表示されなければ再起動 |
+| Claude Code | `~/.claude/skills/crossrag/` | `/skills`で一覧、`/crossrag`で明示起動。新しいskill directoryをセッション中に追加したら`/reload-skills` |
+| Gemini CLI | `~/.agents/skills/crossrag/`または`~/.gemini/skills/crossrag/` | `gemini skills list`または`/skills list`で確認し、説明に合う依頼を自然文で送る。個別skillのslash起動は公式CLI資料に記載なし。`/skills reload`で再読込 |
+| Grok Build | `~/.agents/skills/crossrag/`または`~/.grok/skills/crossrag/` | `/skills`で一覧、`/crossrag`で明示起動。表示されなければ再起動 |
+| Pi | `~/.agents/skills/crossrag/`または`~/.pi/agent/skills/crossrag/` | `/skill:crossrag`で明示起動、`/reload`で再読込 |
 
-スキルを追加した後に一覧へ出ない場合は、ホストの再読込み・再起動方法を使ってください。プロジェクト単位に置く場合はホストごとに探索先が異なるため、各公式資料を確認してください。上表は配置形式の案内であり、実機でのスキル認識・実行を検証したという意味ではありません。
+上記は各ホストの公式探索先とコマンドに基づく案内です。プロジェクト領域の場所や信頼設定はホストごとに異なります。配布・設定の説明は、各ホストで実際にスキルがロードされ検索が動作したことを保証しません。実機確認の範囲は、完了報告で分けて示します。
+
+同じホストで複数の探索先に同名のスキルを置くと、重複または優先順位の警告が出る場合があります。共有パスとホスト固有パスのどちらか一方を使ってください。Gemini CLIでは`gemini skills link <path>`も選べますが、共有パスへのコピーと同時には使わないでください。
 
 スクリプトを実行できないときは検索を実行したと装わず、必要なセットアップを伝えてください。言語だけで下書きする場合も、数値検索による候補を使っていないことを明示します。
 
@@ -138,7 +167,7 @@ cp -R skill/crossrag/. "$HOME/.claude/skills/crossrag/"
 
 検索本体はCrossRAG Lab v0.1を基にした研究プロトタイプです。背景として[Geometric Deep Learning](https://arxiv.org/abs/1603.09320)と[Sentence-Transformersの類似度](https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html)を参照しています。
 
-各ホストの探索場所と起動方法は変わることがあるため、利用前に公式資料も確認してください: [Codex](https://developers.openai.com/codex/skills)、[Claude Code](https://code.claude.com/docs/en/skills)、[Gemini CLI](https://geminicli.com/docs/cli/using-agent-skills/)、[Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces)、[Pi](https://pi.dev/docs/latest/skills)。
+各ホストの探索場所と起動方法は変わるため、利用前に[Codex](https://developers.openai.com/codex/skills)、[Claude Code](https://code.claude.com/docs/en/skills)、[Gemini CLI](https://geminicli.com/docs/cli/using-agent-skills/)、[Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces)、[Pi](https://pi.dev/docs/latest/skills)の公式資料も確認してください。
 
 ## ライセンス
 
