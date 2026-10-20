@@ -295,7 +295,7 @@ class RayCliTest(unittest.TestCase):
         command = [
             sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "alpha", "--B", "beta",
             "--corpus", str(ROOT / "tests" / "fixtures" / "synthetic_corpus.json"),
-            "--encoder", "hash", "--search-mode", "ray", "--ray-radius", "0.4",
+            "--encoder", "hash", "--search-mode", "ray", "--ray-method", "pca-cross", "--ray-radius", "0.4",
             "--ray-start-distance", "0", "--ray-cluster-gap", "0.5", "--ray-min-set-size", "2",
         ]
         result = json.loads(subprocess.run(command, cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8"))
@@ -313,7 +313,7 @@ class RayCliTest(unittest.TestCase):
         command = [
             sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "alpha", "--B", "beta",
             "--corpus", str(ROOT / "tests" / "fixtures" / "synthetic_corpus.json"),
-            "--encoder", "hash", "--search-mode", "ray", "--ray-radius", "0",
+            "--encoder", "hash", "--search-mode", "ray", "--ray-method", "pca-cross", "--ray-radius", "0",
         ]
         result = subprocess.run(command, cwd=ROOT, capture_output=True, check=False)
 
