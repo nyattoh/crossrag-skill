@@ -136,7 +136,7 @@ def calibrate_control_pairs(A, B, corpus, encoder, *, control_pairs=None, contro
         return {
             "valid_rate": valid_rate,
             "valid_count": valid_count,
-            "emergence_ratio_mean": result["evaluation"]["ratio_means"][RATIO_METHOD]["emergence_ratio"],
+            "emergence_ratio_mean": float(np.mean([metrics[i]["emergence_ratio"] for i in eligible_indices])) if eligible_indices else 0.0,
             "top_k_emergence_ratio_mean": result["evaluation"]["ratio_means"][RATIO_METHOD]["emergence_ratio"],
             "top_k_valid_rate": result["evaluation"]["ratio_means"][RATIO_METHOD]["between_AB_fraction"],
             "top_k": [item["corpus_index"] for item in result["evaluation"]["methods"][RATIO_METHOD]["selected"]],
@@ -632,9 +632,32 @@ def compare_pair(word_pair, sentence_pair, corpus, encoder, limit, seed, corpus_
     }
 
 
+def _calibration_markdown_lines(calibration):
+    if not calibration:
+        return []
+    target = calibration["target"]
+    lines = ["", "## Calibration", "",
+             f"- Controls: {target['control_count']}",
+             f"- Valid rate: {target['valid_rate']:.4f} ({target.get('valid_count', 'n/a')}/{target.get('eligible_count', 'n/a')})",
+             f"- Pair percentile: {target['pair_percentile']:.1f}; descending rank: {target['rank_descending']}",
+             f"- Token joint-supported rate: {target['token_joint_supported_rate']:.4f} ({target['token_joint_supported_count']}/{target['eligible_count']})",
+             "",
+             "| Pair | Score mean | A support | B support | Between support | Plane support | Joint-supported rate |",
+             "|---|---:|---:|---:|---:|---:|---:|"]
+    for label, item in [("target", target), *((" × ".join(control["pair"]), control) for control in calibration["controls"])]:
+        lines.append(
+            f"| {label} | {item['token_score_mean']:.4f} | {item['token_a_side_support_mean']:.4f} | "
+            f"{item['token_b_side_support_mean']:.4f} | {item['token_between_direction_support_mean']:.4f} | "
+            f"{item['token_plane_support_mean']:.4f} | {item['token_joint_supported_rate']:.4f} |"
+        )
+    lines.extend(["", f"- Interpretation: {calibration['limitations']['interpretation']}"])
+    return lines
+
+
 def render_markdown(result):
     if result.get("mode") == "word-vs-sentence":
-        return "\n\n".join(("# Word comparison\n\n" + render_markdown(result["word"]), "# Sentence comparison\n\n" + render_markdown(result["sentence"])))
+        rendered = "\n\n".join(("# Word comparison\n\n" + render_markdown(result["word"]), "# Sentence comparison\n\n" + render_markdown(result["sentence"])))
+        return rendered + "\n".join(_calibration_markdown_lines(result.get("calibration")))
     method_names = tuple(result["methods"])
     lines = [
         "# Third-concept comparison",
@@ -670,24 +693,7 @@ def render_markdown(result):
     lines.extend(["", "## Evaluation summary", ""])
     for name, item in result["evaluation"]["wedge_ablation"].items():
         lines.append(f"- {name}: tau vs balance = {item['kendall_tau_b_vs_balance']}; tau vs no-wedge = {item['kendall_tau_b_vs_no_wedge']}")
-    calibration = result.get("calibration")
-    if calibration:
-        target = calibration["target"]
-        lines.extend(["", "## Calibration", "",
-                      f"- Controls: {calibration['control_count']}",
-                      f"- Valid rate: {target['valid_rate']:.4f} ({target.get('valid_count', 'n/a')}/{target.get('eligible_count', 'n/a')})",
-                      f"- Pair percentile: {target['pair_percentile']:.1f}; descending rank: {target['rank_descending']}",
-                      f"- Token joint-supported rate: {target['token_joint_supported_rate']:.4f} ({target['token_joint_supported_count']}/{target['eligible_count']})",
-                      "",
-                      "| Pair | Score mean | A support | B support | Between support | Plane support | Joint-supported rate |",
-                      "|---|---:|---:|---:|---:|---:|---:|"])
-        for label, item in [("target", target), *((" × ".join(control["pair"]), control) for control in calibration["controls"])]:
-            lines.append(
-                f"| {label} | {item['token_score_mean']:.4f} | {item['token_a_side_support_mean']:.4f} | "
-                f"{item['token_b_side_support_mean']:.4f} | {item['token_between_direction_support_mean']:.4f} | "
-                f"{item['token_plane_support_mean']:.4f} | {item['token_joint_supported_rate']:.4f} |"
-            )
-        lines.extend(["", f"- Interpretation: {calibration['limitations']['interpretation']}"])
+    lines.extend(_calibration_markdown_lines(result.get("calibration")))
     lines.extend(["", "## Notes", ""])
     lines.extend(f"- {note}" for note in result["notes"])
     lines.extend(["", result["disclaimer"], ""])

@@ -237,6 +237,91 @@ class CompareThirdConceptTest(unittest.TestCase):
 
 
 class ComparisonV3Test(unittest.TestCase):
+    def test_markdown_renders_real_calibration_control_count(self):
+        corpus = ["joint", "unrelated"]
+        encoder = make_encoder("hash")
+        result = compare_methods("steam", "sleep", corpus, encoder, limit=1, null_samples=4)
+        result["calibration"] = comparison.calibrate_control_pairs(
+            "steam", "sleep", corpus, encoder,
+            control_pairs=[("desk", "pencil"), ("snow", "bird")], limit=1, null_samples=4,
+        )
+
+        rendered = comparison.render_markdown(result)
+
+        self.assertIn("## Calibration", rendered)
+        self.assertIn("- Controls: 2", rendered)
+
+    def test_calibration_emergence_ratio_mean_uses_all_eligible_rows(self):
+        corpus = ["joint", "one-sided", "excluded joint", "counter-vector"]
+        vectors = {
+            "steam": [1, 0, 0], "sleep": [0, 1, 0],
+            "desk": [1, 0, 0], "pencil": [0, 1, 0],
+            "joint": [0.5, 0.5, 0.707107], "one-sided": [0.8, 0, 0.6],
+            "excluded joint": [0.5, 0.5, 0.707107],
+            "counter-vector": [-2.8, -2, -2.014214],
+        }
+        encoder = FixedEncoder(vectors)
+        exclude = ["excluded joint"]
+        calibration = comparison.calibrate_control_pairs(
+            "steam", "sleep", corpus, encoder, control_pairs=[("desk", "pencil")],
+            exclude=exclude, limit=1, p_min=0.0, null_samples=4,
+        )
+
+        for pair, summary in ((["steam", "sleep"], calibration["target"]),
+                              (["desk", "pencil"], calibration["controls"][0])):
+            with self.subTest(pair=pair):
+                space = comparison.shared_geometry_space(*pair, corpus, encoder)
+                metrics = comparison.geometry(
+                    space["a_vector"], space["b_vector"], space["passage_vectors"],
+                    mu=space["mu"], p_min=0.0,
+                )
+                eligible = [i for i, excluded in enumerate(
+                    comparison.exclusion_mask(space, *pair, exclude)
+                ) if not excluded]
+                expected = float(np.mean([metrics[i]["emergence_ratio"] for i in eligible]))
+                self.assertEqual(eligible, [0, 1, 3])
+                self.assertNotAlmostEqual(expected, float(np.mean([
+                    item["emergence_ratio"] for item in metrics
+                ])))
+                baseline = compare_methods(
+                    *pair, corpus, encoder, exclude=exclude, limit=1, p_min=0.0, null_samples=4,
+                )
+                self.assertEqual(
+                    summary["top_k_emergence_ratio_mean"],
+                    baseline["evaluation"]["ratio_means"][comparison.RATIO_METHOD]["emergence_ratio"],
+                )
+                self.assertNotEqual(summary["emergence_ratio_mean"], summary["top_k_emergence_ratio_mean"])
+                self.assertAlmostEqual(summary["emergence_ratio_mean"], expected)
+
+    def test_calibration_emergence_ratio_mean_is_zero_without_eligible_rows(self):
+        calibration = comparison.calibrate_control_pairs(
+            "steam", "sleep", ["excluded"], make_encoder("hash"),
+            control_pairs=[("desk", "pencil")], exclude=["excluded"], limit=1, null_samples=4,
+        )
+        for summary in (calibration["target"], *calibration["controls"]):
+            self.assertEqual(summary["eligible_count"], 0)
+            self.assertEqual(summary["emergence_ratio_mean"], 0.0)
+            self.assertEqual(summary["top_k_emergence_ratio_mean"], 0.0)
+
+    def test_word_vs_sentence_markdown_renders_parent_calibration(self):
+        corpus = ["joint", "unrelated"]
+        encoder = make_encoder("hash")
+        result = comparison.compare_pair(
+            ("steam", "sleep"), ("steam rises", "sleep restores"),
+            corpus, encoder, 1, 0, None, [], 0.0, 4,
+        )
+        result["calibration"] = comparison.calibrate_control_pairs(
+            "steam", "sleep", corpus, encoder,
+            control_pairs=[("desk", "pencil")], limit=1, p_min=0.0, null_samples=4,
+        )
+
+        rendered = comparison.render_markdown(result)
+
+        self.assertEqual(rendered.count("## Calibration"), 1)
+        self.assertIn("- Controls: 1", rendered)
+        self.assertIn("# Word comparison", rendered)
+        self.assertIn("# Sentence comparison", rendered)
+
     def test_control_pair_calibration_is_seeded_and_reports_pair_percentile(self):
         calibrate = getattr(comparison, "calibrate_control_pairs")
         corpus = ["A and B together", "A alone", "B alone", "unrelated", "English config: enabled"]
@@ -333,7 +418,7 @@ class ComparisonV3Test(unittest.TestCase):
     def test_markdown_renders_calibration_scores_and_all_token_criteria(self):
         result = comparison.compare_methods("steam", "sleep", ["joint"], make_encoder("hash"), limit=1, null_samples=2)
         summary = {
-            "pair_percentile": 75.0, "rank_descending": 2, "valid_rate": 0.5,
+            "pair_percentile": 75.0, "rank_descending": 2, "valid_rate": 0.5, "control_count": 1,
             "valid_count": 1, "eligible_count": 2, "token_joint_supported_count": 1,
             "token_joint_supported_rate": 0.5, "token_score_mean": 0.6,
             "token_a_side_support_mean": 0.7, "token_b_side_support_mean": 0.8,
@@ -341,7 +426,7 @@ class ComparisonV3Test(unittest.TestCase):
         }
         result["calibration"] = {
             "target": summary, "controls": [{"pair": ["x", "y"], **summary}],
-            "control_count": 1, "limitations": {"interpretation": "descriptive only"},
+            "limitations": {"interpretation": "descriptive only"},
         }
         rendered = comparison.render_markdown(result)
         self.assertIn("## Calibration", rendered)

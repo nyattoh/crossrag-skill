@@ -389,6 +389,25 @@ class LeakageAndCliTest(unittest.TestCase):
 
 
 class RatioGeometryTest(unittest.TestCase):
+    def test_token_geometry_empty_candidates_returns_empty(self):
+        from third_concept import token_geometry
+
+        a, b = np.array([1., 0., 0.]), np.array([0., 1., 0.])
+        for mu in (None, np.zeros(3)):
+            with self.subTest(mu=mu):
+                self.assertEqual(token_geometry(a, b, [], mu=mu), [])
+
+    def test_token_geometry_nonempty_vector_is_one_candidate(self):
+        from third_concept import token_geometry
+
+        a, b = np.array([1., 0., 0.]), np.array([0., 1., 0.])
+        candidate = np.array([1., 1., 0.])
+        for mu in (None, np.zeros(3)):
+            with self.subTest(mu=mu):
+                result = token_geometry(a, b, candidate, mu=mu)
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result, token_geometry(a, b, [candidate], mu=mu))
+
     def test_token_geometry_known_vectors_have_joint_support_and_mean_grouping(self):
         from third_concept import token_geometry
 

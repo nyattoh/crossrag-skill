@@ -138,7 +138,7 @@ def token_geometry(a_tokens, b_tokens, candidate_tokens, *, mu=None):
     if candidate_array is None:
         candidate_groups = [rows(group) for group in candidate_tokens]
     elif candidate_array.ndim == 1:
-        candidate_groups = [candidate_array[None, :]]
+        candidate_groups = [] if candidate_array.size == 0 else [candidate_array[None, :]]
     elif candidate_array.ndim == 2:
         candidate_groups = [candidate_array[index:index + 1] for index in range(len(candidate_array))]
     elif candidate_array.ndim == 3:
