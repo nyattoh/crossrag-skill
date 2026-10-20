@@ -82,3 +82,25 @@ Residual-cluster has no content or similarity filters. Only rows matching explic
 Statuses are `hits_found`, `no_hits` (rays exist but no passage lies in a tube), `no_residual_clusters` (no corpus rows remain after `--exclude`, no usable residuals, no cluster reaches `--ray-min-cluster-size`, or only zero-resultant clusters remain; the last case is possible only when `--ray-cluster-cosine` is about `1e-12` or smaller, given the `1e-12` tolerance), and `plane_unavailable`, with reason `embedding_dimension_below_three`, `source_anchors_coincide`, or `plane_rank_deficient`. Output includes `mode: "normal-ray"`, `method: "affine_residual_cluster"`, `input{A,B,C}`, `params`, `plane{origin,basis,singular_values}`, `clustering` counts and `unusable_corpus_indices`, `rays[{ray_id, seed_corpus_index, member_corpus_indices, member_count, direction, mean_residual, resultant_norm, coherence, hit_count, hits[{corpus_index,a,b,line,axial_distance,radial_distance,in_cluster}]}]`, `warnings`, and `disclaimer`. Corpus indices refer to original row order.
 
 Only explicit `--exclude` terms remove passages in the default method. The output records `params.encoding_path = "encode_passage"`. Distances are not calibrated across encoders. The ray direction is estimated from the supplied corpus distribution; it is not an A×B cross-product direction or a semantic fact. This method has not been evaluated for usefulness.
+
+## random-orthogonal (experimental)
+
+Use this mode to explore reproducible random directions in the orthogonal complement of the affine subspace defined by repeated context inputs. It returns existing corpus rows with provenance; it does not generate retrieved rows or judge semantic relevance or quality.
+
+```bash
+python scripts/third_concept_cli.py --search-mode random-orthogonal --context 'rain' --context 'clock' --corpus references/example-corpus.json --seed 7 --ray-count 8 --serendipity 60
+```
+
+Repeat `--context` at least twice. The first context embedding is the origin. Encode all context and corpus inputs through `encode_passage`, then use SVD to determine the rank of the affine span. Draw each direction from a seeded Gaussian vector and project it into the orthogonal complement. The mode-specific options are `--context`, `--seed`, `--ray-count`, `--serendipity`, and `--law`; do not mix options from the legacy `ray` or other search modes. Legacy modes retain their existing arguments and behaviour.
+
+`--serendipity` is an integer in the inclusive range 0–100 and defaults to 60. Its exact tone bands are 0–33 `grounded` (a modest leap), 34–66 `playful` (a strange law), and 67–100 `absurd` (a thoroughly nonsensical law). Let `s = serendipity / 100`; unless explicitly overridden by a caller, use radius `0.25 * (0.5 + s)` and cosine threshold `0.85 - 0.35 * s`. The knob controls geometric exploration, not an estimate of surprise or usefulness.
+
+`--ray-cluster-cosine` explicitly overrides the serendipity-mapped cosine threshold in this mode. The output records both `params.mapped_cosine_threshold` and the effective value in `params.cosine_threshold`; `params.cosine_threshold_source` identifies the winner as `serendipity_mapping` or `explicit_override`. For example, add `--ray-cluster-cosine 0.5` to use 0.5 while retaining the mapped value for comparison.
+
+Return deterministic geometry clusters in `selected_clusters` and `combined_clusters`, with real corpus rows and their source provenance. Report the forward ray parameter `t`, origin-relative radial distance, and `ray_distance` separately. Rows behind the origin carry `behind_origin`; do not describe them as forward hits. When the rank is valid and at least one non-excluded candidate row exists but no row enters any ray tube, you must return the nearest real row as an explicitly labelled singleton fallback; it is not a tube hit. Return an honest unavailable state when the corpus is empty, every candidate is excluded, or an invalid or unavailable rank prevents forming a valid orthogonal complement.
+
+Without `--law`, preserve the JSON-serialisable `awaiting` state and include the exact instruction `この世界が成立する奇妙な法則を一つ作れ` in the host prompt. The active host model creates the law and the caller repeats the same arguments with `--law`; the Python script makes no LLM/API call. Label any fictional host-generated law example as fictional and never describe it as retrieved content or an actual run.
+
+In this awaiting state, `host_prompt` is a JSON object, not only a prompt string. It exposes `contexts`, `selected_clusters`, `tone`, `tone_instruction`, and `guardrails` as structured fields alongside the `prompt` string; `required_directive` records the required host instruction. The prompt string is supplied for hosts that consume a single text prompt, while the structured fields remain available to hosts that accept typed context.
+
+Document errors for invalid or insufficient context, an unavailable orthogonal complement, and empty/no-hit geometry distinctly. Do not infer semantic relevance, retrieval quality, creativity, or superiority from these geometric results.

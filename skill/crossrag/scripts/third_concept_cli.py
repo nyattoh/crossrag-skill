@@ -41,6 +41,41 @@ def positive_cluster_size(value):
     return parsed
 
 
+def percentage(value):
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("serendipity must be an integer between 0 and 100") from exc
+    if not 0 <= parsed <= 100:
+        raise argparse.ArgumentTypeError("serendipity must be an integer between 0 and 100")
+    return parsed
+
+
+def explicitly_supplied(argv, *options):
+    return any(argument.split("=", 1)[0] in options for argument in argv)
+
+
+def build_host_prompt(contexts, selected_clusters, tone, tone_instruction, guardrails):
+    directive = "この世界が成立する奇妙な法則を一つ作れ"
+    prompt = (
+        f"{directive}\n\n"
+        f"contexts: {json.dumps(contexts, ensure_ascii=False)}\n"
+        f"selected_clusters: {json.dumps(selected_clusters, ensure_ascii=False)}\n"
+        f"tone: {tone}\n"
+        f"tone_instruction: {tone_instruction}\n"
+        f"guardrails: {json.dumps(guardrails, ensure_ascii=False)}"
+    )
+    return {
+        "contexts": contexts,
+        "selected_clusters": selected_clusters,
+        "tone": tone,
+        "tone_instruction": tone_instruction,
+        "guardrails": guardrails,
+        "prompt": prompt,
+        "required_directive": directive,
+    }
+
+
 def read_corpus(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     # Any plain-text row routes the corpus to explore(), which validates every row; pair corpora keep the legacy loader.
@@ -52,8 +87,8 @@ def read_corpus(path):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Rank third-concept candidates or explore corpus sets along a normal ray")
-    parser.add_argument("--A", required=True)
-    parser.add_argument("--B", required=True)
+    parser.add_argument("--A")
+    parser.add_argument("--B")
     parser.add_argument("--C", help="source article text for residual-cluster ray search")
     parser.add_argument("--corpus")
     parser.add_argument("--encoder", choices=("hash", "semantic"), default="hash")
@@ -68,7 +103,7 @@ def main():
     parser.add_argument("--vocab")
     parser.add_argument("--hypotheses")
     parser.add_argument("--no-center", action="store_true")
-    parser.add_argument("--search-mode", choices=("third-concept", "ray"), default="third-concept")
+    parser.add_argument("--search-mode", choices=("third-concept", "ray", "random-orthogonal"), default="third-concept")
     parser.add_argument("--ray-method", choices=("residual-cluster", "pca-cross"), default="residual-cluster")
     parser.add_argument("--ray-radius", type=float, default=0.25)
     parser.add_argument("--ray-start-distance", type=float, default=0.25)
@@ -78,8 +113,35 @@ def main():
     parser.add_argument("--ray-min-set-size", type=positive_set_size)
     parser.add_argument("--emit-prompt", action="store_true")
     parser.add_argument("--with-math", action="store_true")
+    parser.add_argument("--context", action="append", default=[])
+    parser.add_argument("--ray-count", type=positive_limit, default=1)
+    parser.add_argument("--serendipity", type=percentage, default=60)
+    parser.add_argument("--law")
+    argv = sys.argv[1:]
     args = parser.parse_args()
     try:
+        has_new_options = explicitly_supplied(argv, "--context", "--ray-count", "--serendipity", "--law")
+        if args.search_mode == "random-orthogonal":
+            if args.A is not None or args.B is not None or args.C is not None:
+                parser.error("random-orthogonal search accepts --context only and does not support --A, --B or --C")
+            if len(args.context) < 2:
+                parser.error("random-orthogonal search requires at least two --context values")
+            if explicitly_supplied(
+                argv, "--limit", "--method", "--p-min", "--null-samples", "--vocab",
+                "--hypotheses", "--no-center", "--ray-method", "--ray-radius", "--ray-start-distance",
+                "--ray-min-cluster-size", "--ray-cluster-gap", "--ray-min-set-size",
+                "--emit-prompt", "--with-math",
+            ):
+                parser.error("random-orthogonal search does not support legacy ranking, hypothesis, maths, centre, vocab or ray-method options")
+            if args.law is not None and not args.law.strip():
+                parser.error("--law must be non-empty")
+        else:
+            if args.A is None:
+                parser.error("the following arguments are required: --A")
+            if args.B is None:
+                parser.error("the following arguments are required: --B")
+            if has_new_options:
+                parser.error("--context, --ray-count, --serendipity and --law are only supported with --search-mode random-orthogonal")
         if args.C is not None and args.search_mode != "ray":
             parser.error("--C is only supported with --search-mode ray")
         if args.search_mode == "ray" and (
@@ -106,6 +168,46 @@ def main():
             for flag, supplied in unsupported:
                 if supplied:
                     parser.error(f"{args.ray_method} ray search does not support {flag}")
+        if args.search_mode == "random-orthogonal":
+            corpus = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
+            from serendipity_ray import explore_random_orthogonal_ray
+
+            encoder = make_encoder(args.encoder, args.model, prefix_policy=args.prefix_policy)
+            result = explore_random_orthogonal_ray(
+                args.context, corpus, encoder, seed=args.seed, ray_count=args.ray_count,
+                level=args.serendipity, exclude=args.exclude, corpus_path=args.corpus,
+                cosine_threshold=args.ray_cluster_cosine,
+            )
+            result.setdefault("params", {})["serendipity"] = args.serendipity
+            result["input"] = {"contexts": args.context}
+            selected_clusters = result.get("combined_clusters", [])
+            tone = result["params"].get("tone_band", "playful")
+            tone_instruction = {
+                "grounded": "身近でありそうな要素から、控えめで具体的な奇妙さを作る。",
+                "playful": "選ばれたクラスターを手がかりに、簡潔で具体的な奇妙な法則として表現する。",
+                "absurd": "大胆で不条理な飛躍を使い、創作であることが伝わる奇妙な法則にする。",
+            }.get(tone, "選ばれたクラスターを手がかりに、簡潔で具体的な奇妙な法則として表現する。")
+            result["params"]["tone"] = tone
+            result["params"]["tone_instruction"] = tone_instruction
+            result["workflow_status"] = "finalized" if args.law is not None else "awaiting_law"
+            result["finalized"] = args.law is not None
+            result["awaiting_host_law"] = args.law is None
+            result["law"] = args.law
+            result["host_prompt"] = None if args.law is not None else build_host_prompt(
+                args.context, selected_clusters, tone, tone_instruction,
+                ["法則は創作として提示し、現実の事実や科学的発見と主張しない。", "入力文脈や候補の真偽を捏造しない。"],
+            )
+            source_indices = sorted({
+                hit["corpus_index"]
+                for ray in result.get("rays", [])
+                for hit in ray.get("hits", [])
+                if isinstance(hit, dict) and isinstance(hit.get("corpus_index"), int)
+            })
+            result["provenance"] = {"source_corpus_indices": source_indices}
+            if args.law is not None:
+                result["provenance"]["law_source"] = "host_llm"
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
         if args.emit_prompt and not args.with_math:
             print(build_hypothesis_prompt(args.A, args.B))
             return
