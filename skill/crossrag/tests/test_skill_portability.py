@@ -53,6 +53,7 @@ class SkillPortabilityTest(unittest.TestCase):
             "scripts/engine.py",
             "scripts/third_concept.py",
             "scripts/third_concept_cli.py",
+            "scripts/serendipity_ray.py",
             "scripts/residual_ray.py",
             "scripts/compare_third_concept.py",
             "references/methodology.md",

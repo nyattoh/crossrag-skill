@@ -8,7 +8,7 @@ CrossRAGは、入力した概念から既存コーパスのモチーフを複数
 
 ![CrossRAG architecture: ordered context concepts and a corpus share one encoder; similarity, projection-residual, oriented-wedge, and reproducible random ranking return JSON motifs to a separate host LLM.](docs/images/architecture.svg)
 
-同じ文脈・コーパス・エンコーダに対して、類似、直交残差、向き付き楔積、再現可能なランダム順位の4手法を比較する構成です。図の平面と矢印は幾何学的な関係の模式図であり、高次元の楔積を一意な3次元の法線として扱うものではありません。直交残差は文脈全体が張る空間から計算し、楔積の向きは先頭2概念から計算します。先頭2概念を入れ替えると楔積成分の符号は反転しますが、重みを混ぜた最終順位全体が逆転するとは限りません。
+同じ文脈・コーパス・エンコーダに対して、類似、直交残差、向き付き楔積、再現可能なランダム順位などを使います。図の平面と矢印は幾何学的な関係の模式図であり、高次元の楔積を一意な3次元の法線として扱うものではありません。直交残差は文脈全体が張る空間から計算し、楔積の向きは先頭2概念から計算します。先頭2概念を入れ替えると楔積成分の符号は反転しますが、重みを混ぜた最終順位全体が逆転するとは限りません。
 
 既定はオフラインの文字 n-gram ハッシュ特徴で、意味埋め込みではありません。意味埋め込みは SentenceTransformer / E5 を使う任意の選択肢です。検索の出力は既存コーパスのモチーフと数値スコアを含む JSON で、創作文章や未検証の仮説を書くのは別のホストモデルです。順位は実験的なヒューリスティックであり、創造性や発見の向上を証明せず、モチーフも事実の証拠にはなりません。
 
@@ -27,7 +27,8 @@ skill/crossrag/
   scripts/run.py        # CLI
   scripts/engine.py     # 検索本体
   scripts/third_concept.py
-  scripts/third_concept_cli.py
+  scripts/third_concept_cli.py  # third-concept, normal-ray, random-orthogonal CLI
+  scripts/serendipity_ray.py
   scripts/residual_ray.py
   scripts/compare_third_concept.py
   references/methodology.md
@@ -90,9 +91,26 @@ python scripts/run.py --context "犬、カレー、夕暮れ、帰宅" --mode cr
 python scripts/run.py --context "記憶、法線、検索" --mode discovery --method orthogonal --limit 5
 python scripts/run.py --context "犬、カレー" --mode creative --method similar --encoder hash
 python scripts/run.py --context "犬、カレー" --corpus references/example-corpus.json
+python scripts/third_concept_cli.py --search-mode random-orthogonal --context "雨" --context "時計" --corpus references/example-corpus.json --seed 7 --ray-count 8 --serendipity 60
 ```
 
 `--corpus`に相対パスを渡す場合は、`skill/crossrag`からの相対パスになります。リポジトリ外のユーザーコーパスには絶対パスを使ってください。`--encoder semantic`はsentence-transformersとモデルをローカルに用意した場合だけ指定します。
+
+`random-orthogonal`は、複数回指定した`--context`の最初の埋め込みを原点にして、その文脈が張るアフィン部分空間の直交補空間へseed付きGaussian方向を投影し、コーパスを幾何条件で探索する実験モードです。少なくとも2個の`--context`を別々に指定します。`--seed`で方向を再現し、`--ray-count`で試す方向数、`--serendipity`（0〜100、既定60）で探索半径と光線コサイン条件を調整します。値に対応する法則の調子は、0–33が`grounded`（控えめな飛躍）、34–66が`playful`（奇妙な法則）、67–100が`absurd`（徹底的にデタラメな法則）です。境界は整数値で示した範囲に含めます。既定値は半径`0.25 × (0.5 + s)`、コサイン閾値`0.85 − 0.35 × s`（`s = serendipity / 100`）です。出力には再現可能な幾何クラスタとして`selected_clusters`と`combined_clusters`を含みます。候補行と出典情報をそのまま返し、意味的な関連性や品質は判定しません。光線の前向き距離`t`、原点からの半径距離`radial`、光線からの距離`ray_distance`を区別し、原点より後ろの候補は`behind_origin`として示します。有効なrankと1件以上の非除外候補行がある状態で光線チューブにhitがない場合は、最近傍の実在行をsingleton fallbackとして必ず返し、fallbackと明示してチューブhitには数えません。コーパスが空、候補がすべて除外、または有効な直交補空間を定められないrankの場合は、候補を捏造せず利用不能状態を返します。
+
+既定のcosine閾値はserendipityから写像しますが、`--ray-cluster-cosine`を指定するとその値が明示的に優先されます。JSONの`params.mapped_cosine_threshold`は写像値、`params.cosine_threshold`は実際に使った閾値、`params.cosine_threshold_source`は採用元（`serendipity_mapping`または`explicit_override`）です。例えば`--ray-cluster-cosine 0.5`を付けた場合、写像値を併記したうえで有効値と採用元を記録します。
+
+法則文を付けない場合、JSONは`awaiting`状態を示し、ホストモデル向けプロンプトに「`この世界が成立する奇妙な法則を一つ作れ`」という指示を含めます。ホストモデルはその指示から法則を作り、同じ引数に`--law`を加えて検索を再実行します。スクリプト自身はLLM/APIを呼びません。READMEの作例は説明用にホストモデルが生成した架空の法則であり、コーパスから検索された文や実行結果ではありません。
+
+awaiting時の`host_prompt`は単なる文字列ではなくJSONオブジェクトです。`contexts`、`selected_clusters`、`tone`、`tone_instruction`、`guardrails`を構造化フィールドとして持ち、同じ内容をまとめた`prompt`文字列も含みます。`required_directive`にもホストへの必須指示を記録します。
+
+架空のホスト生成法則の例（検索結果でも実行結果でもありません）: 「雨の音が聞こえるものだけが、過去を記憶できる。」再実行時には、この文を同じ検索引数へ`--law`として渡します。
+
+```powershell
+python scripts/third_concept_cli.py --search-mode random-orthogonal --context "雨" --context "時計" --corpus references/example-corpus.json --seed 7 --ray-count 8 --serendipity 60 --law "雨の音が聞こえるものだけが、過去を記憶できる。"
+```
+
+入力不足や不正な値はエラーとして扱います。文脈埋め込みから直交補空間を作れない場合は検索不能の状態を示し、候補がない場合と光線チューブに候補が入らない場合は区別します。有効なrankと非空の非除外候補があるのにチューブhitがない場合は、最近傍の実在行をsingleton fallbackとして必ず返し、fallbackと明示します。コーパスが空、候補がすべて除外、または有効な直交補空間を定められないrankの場合は、利用不能状態を返します。
 
 To inspect corpus passages near rays estimated from residual clusters outside the affine plane through A, B and a source article C, use the experimental normal-ray CLI:
 
@@ -159,7 +177,7 @@ python scripts/third_concept_cli.py --A $A --B $B --C $C --search-mode ray --enc
 
 次の検証課題は、同一条件での `similar`／`orthogonal`／`random` などとの比較、意味埋め込み・大規模コーパスへの切替、人間による「話の腰を折られた度合い」の評価です。
 
-## 4つの手法
+## 検索方式
 
 同じエンコーダ、同じコーパス、同じ生成条件で比べてください。条件が違うと比較になりません。
 
@@ -167,6 +185,7 @@ python scripts/third_concept_cli.py --A $A --B $B --C $C --search-mode ray --enc
 - **orthogonal**: 文脈が張る空間への射影の残差。コサインの帯域と一貫性の重みを混ぜたヒューリスティック
 - **wedge**: 向き付き双ベクトル `a∧b` と `u∧v` のコサイン。先頭2語の順序を入れ替えると符号が反転する。言語的な方向そのものではない
 - **random**: 再現可能なハッシュ順位。対照用
+- **random-orthogonal**: seed付きランダム方向を文脈部分空間の直交補空間へ投影する実験的な幾何探索。意味検索や品質評価ではない
 
 式、限界、評価の置き方は [methodology.md](skill/crossrag/references/methodology.md)、創作と発見の出力の型は [modes.md](skill/crossrag/references/modes.md) にあります。
 

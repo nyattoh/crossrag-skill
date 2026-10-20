@@ -88,6 +88,16 @@ class ResidualRayCliTest(unittest.TestCase):
                         message="ray search does not support",
                     )
 
+    def test_explicit_zero_seed_matches_omitted_seed_for_both_ray_methods(self):
+        for method in ("residual-cluster", "pca-cross"):
+            with self.subTest(method=method):
+                with_c = method == "residual-cluster"
+                default_seed = self.successful_json("--ray-method", method, with_c=with_c)
+                explicit_zero_seed = self.successful_json(
+                    "--ray-method", method, "--seed", "0", with_c=with_c,
+                )
+                self.assertEqual(explicit_zero_seed, default_seed)
+
     def test_invalid_residual_parameters_route_to_parser_error(self):
         for arguments, message in (
             (("--ray-radius", "0"), "ray radius must be finite and positive"),
