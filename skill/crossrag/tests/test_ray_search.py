@@ -146,6 +146,29 @@ class RaySetSearchTest(unittest.TestCase):
         self.assertAlmostEqual(hit_set["t_start"], 0.1)
         self.assertAlmostEqual(hit_set["t_end"], 0.2)
 
+    def test_ray_returns_geometric_hits_without_semantic_filter_and_preserves_sources(self):
+        points = np.asarray([
+            self.origin + 0.1 * self.direction,
+            self.origin + 0.2 * self.direction,
+        ])
+        sources = [
+            {"corpus_index": 17, "line": "a deliberately unrelated item", "extra": "kept"},
+            {"corpus_index": 23, "line": "another arbitrary item"},
+        ]
+
+        result = search_ray_sets(
+            self.frame, points, sources,
+            radius=0.01, start_distance=0.0, cluster_gap=0.5, min_set_size=2,
+        )
+
+        self.assertEqual(result["status"], "sets_found")
+        items = result["sets"][0]["items"]
+        self.assertEqual([item["label"] for item in items], ["a deliberately unrelated item", "another arbitrary item"])
+        self.assertEqual([item["source_index"] for item in items], [17, 23])
+        self.assertEqual([item["source"] for item in items], sources)
+        self.assertTrue(all(item["radial_distance"] <= result["radius"] for item in items))
+        self.assertTrue(all(item["axial_distance"] >= result["start_distance"] for item in items))
+
     def test_nonzero_center_is_applied_to_candidate_coordinates(self):
         shift = np.array([4.0, -2.0, 1.0])
         a = np.array([1.0, 0.0, 0.0]) + shift

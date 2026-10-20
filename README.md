@@ -99,7 +99,7 @@ To inspect corpus sets near one PCA-selected ray from an A/B plane, use the expe
 python scripts/third_concept_cli.py --A "概念A" --B "概念B" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-gap 0.25 --ray-min-set-size 2
 ```
 
-コーパス記述の平均を基準に選んだ3次元PCA枠でA/Bの張る面に直交する一本の光線を定め、その近傍の概念・記述を軸方向の集合として返します。光線の向きはPCA基底とA×Bの順で決まる規約で、A/Bを入れ替えると反転します。結果は幾何上の近さであり、意味的関連を示しません。集合が見つからない結果も有効です。距離の既定値はエンコーダ間で較正されていないため、semanticモードはモデルがローカルにある場合に限って使ってください。
+コーパス記述の平均を基準に選んだ3次元PCA枠でA/Bの張る面に直交する一本の光線を定め、その近傍の概念・記述を軸方向の集合として返します。光線の向きはPCA基底とA×Bの順で決まる規約で、A/Bを入れ替えると反転します。意味的関連は判定しません。無関係な項目でも幾何条件に合えば返し、条件に合う実在項目がなければ空集合になります。出力にはコーパスの出典情報を保持します。距離の既定値はエンコーダ間で較正されていないため、semanticモードはモデルがローカルにある場合に限って使ってください。
 
 標準出力はUTF-8のJSONです。各候補に`cosine`、`orthogonal`、`wedge`と、選んだ手法の順位が入ります。`--mode`はホスト側モデルへ渡す創作・発見の指示、`--method`は候補を並べる数値方式を切り替えます。
 
