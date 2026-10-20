@@ -28,6 +28,7 @@ skill/crossrag/
   scripts/engine.py     # 検索本体
   scripts/third_concept.py
   scripts/third_concept_cli.py
+  scripts/residual_ray.py
   scripts/compare_third_concept.py
   references/methodology.md
   references/modes.md
@@ -93,13 +94,13 @@ python scripts/run.py --context "犬、カレー" --corpus references/example-co
 
 `--corpus`に相対パスを渡す場合は、`skill/crossrag`からの相対パスになります。リポジトリ外のユーザーコーパスには絶対パスを使ってください。`--encoder semantic`はsentence-transformersとモデルをローカルに用意した場合だけ指定します。
 
-To inspect corpus sets near one PCA-selected ray from an A/B plane, use the experimental normal-ray CLI:
+To inspect corpus passages near rays estimated from residual clusters outside the affine plane through A, B and a source article C, use the experimental normal-ray CLI:
 
 ```powershell
-python scripts/third_concept_cli.py --A "概念A" --B "概念B" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-gap 0.25 --ray-min-set-size 2
+python scripts/third_concept_cli.py --A "概念A" --B "概念B" --C "出典記事" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-cosine 0.7 --ray-min-cluster-size 2 --limit 5
 ```
 
-コーパス記述の平均を基準に選んだ3次元PCA枠でA/Bの張る面に直交する一本の光線を定め、その近傍の概念・記述を軸方向の集合として返します。光線の向きはPCA基底とA×Bの順で決まる規約で、A/Bを入れ替えると反転します。意味的関連は判定しません。無関係な項目でも幾何条件に合えば返し、条件に合う実在項目がなければ空集合になります。出力にはコーパスの出典情報を保持します。距離の既定値はエンコーダ間で較正されていないため、semanticモードはモデルがローカルにある場合に限って使ってください。
+既定の`residual-cluster`方式では、A・B・出典記事Cの埋め込みが定めるアフィン平面から、コーパスの残差を決定的なリーダー方式でクラスタ化し、各クラスタの平均残差方向に光線を定めます。Cは必須です。A・B・Cと全コーパス候補は、単一の`encoder.encode_passage`経路で同じ座標空間に埋め込みます。A・B・Cは入力テキスト、候補は整形済みコーパス行テキスト（ペア行なら例:`aとb。line`）を使い、この方式では`encode_query`を使いません。role prefixを使うエンコーダでは、既知の`query: `または`passage: `ロールprefixがテキスト先頭にあればmarkerとして取り除き、`encode_passage`が全てに同じpassage prefixを付けます。prefix-freeエンコーダではprefixを追加しません。ヒット結果にはコーパスの元のテキストを保持します。出力の`params.encoding_path`は`"encode_passage"`です。意味や関連性の判定、類似度による除外はありません。`--exclude`に一致する行だけを明示的に除外し、平面内に近い残差はクラスタ化できませんが、幾何条件を満たせば検索結果には現れます。A/B/Cに語彙的・意味的に近い行やC自身の行も対象です。光線近傍に条件を満たす実在行がなければ空になります。旧PCA×外積方式は`--ray-method pca-cross`で選べます。距離・クラスタ閾値はエンコーダ間で較正されていません。どちらの方向も意味的事実ではなく、有用性は評価されていません。
 
 標準出力はUTF-8のJSONです。各候補に`cosine`、`orthogonal`、`wedge`と、選んだ手法の順位が入ります。`--mode`はホスト側モデルへ渡す創作・発見の指示、`--method`は候補を並べる数値方式を切り替えます。
 
