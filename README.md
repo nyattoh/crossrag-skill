@@ -1,22 +1,30 @@
 # CrossRAG
 
-CrossRAGは、入力した概念から既存コーパスのモチーフを複数の数値的な見方で取り出し、文章やアイデアを考えるモデルへ別の出発点を渡す実験的なスキルです。検索を実行するのはローカルのPython、最終的な文章を書くのはスキルを使うホスト側のモデルです。
+CrossRAGは、概念A・Bと出典記事Cを入力し、既存コーパスの残差方向をクラスタ化して、Cから延びる光線（normal ray）の近傍にある行を返す実験的な検索スキルです。このresidual-cluster方式はローカルのPythonで数値計算を行い、コーパス内の原文、出典を追跡するID、幾何距離をUTF-8のJSONで返します。
 
-使う価値は、同じ問いを「似ているもの」「文脈と異なる方向」「概念ペアの向き」などで見直し、発想の材料を増やせることです。これは発想支援の候補検索であり、事実確認、因果関係の発見、創造性や通常のRAGに対する優位性を保証しません。
+この方式は意味・関連性・新規性を判定せず、文章や概念を生成・捏造しません。無関係な文や意味のない文も幾何条件を満たせばヒットします。空の結果も正しい結果で、既定値でヒットする保証はありません。有用性、創作品質、通常のRAGに対する優位性は実証されていません。
 
 ## アーキテクチャ
 
-![CrossRAG architecture: ordered context concepts and a corpus share one encoder; similarity, projection-residual, oriented-wedge, and reproducible random ranking return JSON motifs to a separate host LLM.](docs/images/architecture.svg)
+![CrossRAG architecture: A, B, C and all corpus rows share passage encoding; affine residual clusters define rays from C; geometric hits retain corpus provenance; optional host LLM interpretation is separate.](docs/images/architecture.svg)
 
-同じ文脈・コーパス・エンコーダに対して、類似、直交残差、向き付き楔積、再現可能なランダム順位などを使います。図の平面と矢印は幾何学的な関係の模式図であり、高次元の楔積を一意な3次元の法線として扱うものではありません。直交残差は文脈全体が張る空間から計算し、楔積の向きは先頭2概念から計算します。先頭2概念を入れ替えると楔積成分の符号は反転しますが、重みを混ぜた最終順位全体が逆転するとは限りません。
+A・B・Cと全コーパス行を同じ`encoder.encode_passage`経路で埋め込みます。Cを通るアフィン平面からの残差をクラスタ化し、条件を満たすクラスタの平均残差方向に光線を作ります。検索するのは、その光線に対する前方距離と半径の条件を満たす既存行だけです。高次元の平面に一意の法線を仮定せず、方向はコーパスの分布から推定します。
 
-既定はオフラインの文字 n-gram ハッシュ特徴で、意味埋め込みではありません。意味埋め込みは SentenceTransformer / E5 を使う任意の選択肢です。検索の出力は既存コーパスのモチーフと数値スコアを含む JSON で、創作文章や未検証の仮説を書くのは別のホストモデルです。順位は実験的なヒューリスティックであり、創造性や発見の向上を証明せず、モチーフも事実の証拠にはなりません。
+既定のエンコーダは、オフラインの文字 n-gram ハッシュ特徴です。意味埋め込みではありません。SentenceTransformerによる意味埋め込みも選べますが、その場合もnormal-ray検索は意味や関連性で候補を選別しません。検索後にホスト側LLMへ解釈・仮説・創作を依頼することは任意の別工程です。その解釈は数値検索の結果や事実の証拠とは区別します。
 
-図は実装 `93396d8f` に基づきます。[計算式と限界](skill/crossrag/references/methodology.md)も参照してください。
+旧来の4つの順位付け方式とPCA×外積の光線検索も残っています。CLIごとに入力・出力・既定値が異なります。詳細は以下と[SKILL.md](skill/crossrag/SKILL.md)を参照してください。
+
+## 数学的な見方
+
+![CrossRAGの数学：平面への直交射影、4次元空間の残差方向から求める法線、前方距離と半径方向距離によるヒット判定。](docs/images/normal-ray-geometry.svg)
+
+平面への射影点を`q = c + P_V(x-c)`とすると、残差`r = x-q`は平面の方向空間`V`に直交します。似た方向の残差をまとめ、その**生の平均**を正規化した`n`が、そのクラスタから選ぶ法線方向です。各行が光線に近いかは、残差方向の近さとは別に判定します。
+
+図の中・下段は同じ4次元の解析例です。候補を`x₁`・`x₂`の2行とし、クラスタ閾値`0.7`、最小行数`2`で方向を求めます。半径を`0.5`、開始距離を`0.25`にすると、両方ともクラスタに属しますが、取得されるのは`x₂`だけです。`x₁`は平面内のずれも大きく、光線から遠いためです。これは計算を説明する合成例で、実コーパスの検索結果ではありません。図の半径`0.5`はCLIの既定値`0.25`とは異なります。
 
 ## 入っているもの
 
-インストール単位は [`skill/crossrag`](skill/crossrag) です。このディレクトリを、そのままエージェントのスキル置き場へコピーします。
+インストール単位は[`skill/crossrag`](skill/crossrag)です。このディレクトリを、そのままエージェントのスキル置き場へコピーします。
 
 ```text
 skill/crossrag/
@@ -24,52 +32,44 @@ skill/crossrag/
   SKILL.md
   requirements.txt
   agents/openai.yaml
-  scripts/run.py        # CLI
-  scripts/engine.py     # 検索本体
-  scripts/third_concept.py
-  scripts/third_concept_cli.py  # third-concept, normal-ray, random-orthogonal CLI
-  scripts/serendipity_ray.py
-  scripts/residual_ray.py
+  scripts/third_concept_cli.py  # normal-ray / third-concept CLI
+  scripts/residual_ray.py       # アフィン残差クラスタと光線近傍検索
+  scripts/third_concept.py      # 共通エンコーダ、第三概念順位付け、旧PCA光線
+  scripts/run.py                # 旧来の4方式のCLI
+  scripts/engine.py             # 旧来の順位付け本体、ハッシュエンコーダ
   scripts/compare_third_concept.py
   references/methodology.md
   references/modes.md
   references/example-corpus.json
-  tests/                # 回帰テストと合成fixture
+  tests/                       # 回帰テストと合成fixture
 ```
 
-## 何に使うか
+## まず一度使う: residual-cluster normal-ray
 
-- 小説、詩、比喩、意外性のあるコピーを書くとき
-- 分野をまたいだ着想や、変わった研究上のつながりを出すとき
-- 同じコーパスで、類似検索と楔積検索の出方を比べるとき
-
-事実の裏取りには使いません。取り出したモチーフは着想であり、証拠でも、そのまま写す文でもありません。順位はヒューリスティックで、通常のRAGより優れていることは示しません。
-
-## まず一度使う
-
-リポジトリのルートで、必要な依存関係を一度だけ入れます。
+Python 3.10以上とNumPyが準備済みなら、リポジトリのルートから次を実行します。依存が足りない場合は後述の「準備」を参照してください。
 
 ```powershell
-python -m pip install -r skill/crossrag/requirements.txt
 Set-Location skill/crossrag
-python scripts/run.py --context "犬、カレー、夕暮れ" --method similar
+python scripts/third_concept_cli.py --A "概念A" --B "概念B" --C "出典記事" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-cosine 0.7 --ray-min-cluster-size 2 --limit 5
 ```
 
-この最短コマンドは、同梱の22件の日本語例コーパスとオフラインの文字n-gram hashで、類似度による順位を5件返します。JSONの`selected`に含まれる`line`が文章や発想の材料です。`hash`は意味を理解する埋め込みではなく、例コーパスも小さいため、実際の領域には自分のコーパスを指定してください。候補やスコアは事実の根拠ではありません。
+`--A`・`--B`・`--C`にはテキストを直接渡します。`--C`はファイル名を読み込むオプションではありません。上の例は同梱の4行のJSONファイルを使います。`--corpus`を省略した場合は、`engine.py`にある22件の組み込みコーパスを使います。どちらも動作確認用の小さなコーパスです。
 
-`wedge`は既定の方式ですが、hashと短い語の組み合わせでは全候補のwedge成分が0になる場合があります。そのときは出力の`warnings`を読み、wedgeが順位に寄与していないことを明記してください。異なる方式を比べる場合は同じコーパス・エンコーダを使い、方式名だけで性能差を主張しないでください。
+出力の`status`、`clustering`、`rays`を確認してください。`--limit 5`は**返す光線の最大本数**で、ヒット件数ではありません。クラスタがあっても光線近傍に行がなければ`no_hits`になり、クラスタが成立しなければ`no_residual_clusters`になります。既定値で0件になることは異常ではありません。
 
-スキル対応ホストでは、たとえば「CrossRAGを使って、犬・カレー・夕暮れから一つの意外な関係を選び、短い物語を書いて。検索された文は写さないで」と依頼します。ホスト側のモデルがスキルを読み、検索を実行してから文章を作ります。調査の着想がほしい場合は、発見モードで候補を3つ、つながり・不確実性・確かめる最小テストとともに示すよう依頼します。
+以下の検索コマンドも`skill/crossrag`をカレントにして実行します。`--corpus`の相対パスは**プロセスのカレントディレクトリ**から解決されます。この手順では`references/example-corpus.json`が正しく、`skill/crossrag/references/example-corpus.json`ではありません。別の場所から実行する場合やリポジトリ外のコーパスには、実際のカレントに合うパスか絶対パスを指定します。
 
 ## 準備
 
-Python 3.10 以上と NumPy が必要です。既定のハッシュエンコーダはオフラインで動きます。これは文字 n-gram の特徴ベクトルであり、意味埋め込みではありません。OS管理下のPython環境では仮想環境を使ってください。
+Python 3.10以上とNumPyが必要です。既定のハッシュエンコーダはオフラインで動きます。これは文字 n-gram の特徴ベクトルであり、意味埋め込みではありません。OS管理下のPython環境では仮想環境を使ってください。
+
+リポジトリのルートから依存を入れる例:
 
 ```powershell
 python -m pip install -r skill/crossrag/requirements.txt
 ```
 
-macOS/Linuxでは、たとえば次のように仮想環境を使えます。
+macOS/Linuxでは、リポジトリのルートで、たとえば次のように仮想環境を使えます。
 
 ```bash
 python3 -m venv .venv
@@ -77,117 +77,123 @@ source .venv/bin/activate
 python -m pip install -r skill/crossrag/requirements.txt
 ```
 
-macOS/Linuxで`python`がPython 3.10以上を指さない場合は、`python3`で仮想環境を作成・有効化してから依存を入れてください。管理されたPython環境がpipによる直接インストールを拒否する場合も、仮想環境を使います。
+macOS/Linuxで`python`がPython 3.10以上を指さない場合は、`python3`で仮想環境を作成・有効化してから依存を入れてください。管理されたPython環境がpipによる直接インストールを拒否する場合も、仮想環境を使います。既に`skill/crossrag`へ移動している場合、依存ファイルは`requirements.txt`です。
 
-意味埋め込みを使う場合だけ、別途 `sentence-transformers` とモデルがローカルに必要です。初回はモデルのダウンロードが走ります。`--encoder semantic` を付けない限り、ネットワークも有料 API も使いません。
+意味埋め込みを使う場合だけ、別途`sentence-transformers`とモデルが必要です。`--encoder semantic`は`SentenceTransformer(model_name)`を使い、未取得のモデルはダウンロードされる場合があります。モデルがローカルにあることを確認してください。既定モデルは`intfloat/multilingual-e5-small`です。`hash`による検索はネットワークや有料APIを使いません。
 
-## 検索の実行
+## normal-rayの入力と既定値
 
-`skill/crossrag` をカレントにして実行します。
+`third_concept_cli.py`自体の`--search-mode`の既定は`third-concept`です。normal-rayには**`--search-mode ray`を指定**します。そのrayモード内の`--ray-method`の既定が`residual-cluster`です。スキル全体の`run.py`の既定方式を変えるものではありません。
+
+| オプション | residual-clusterでの意味・既定値 |
+| --- | --- |
+| `--A` / `--B` / `--C` | 必須の空でないテキスト。Cは光線の原点となる出典記事 |
+| `--corpus` | UTF-8のJSON配列へのパス。省略時は組み込み22件 |
+| `--encoder` | `hash`（既定）または`semantic` |
+| `--model` | semantic用のモデルID。既定は`intfloat/multilingual-e5-small` |
+| `--prefix-policy` | `auto`（既定）/ `e5` / `prefix-free`。hashには影響しない |
+| `--ray-method` | `residual-cluster`（既定）/ `pca-cross` |
+| `--ray-radius` | 光線からの半径の上限。既定`0.25`、有限の正数 |
+| `--ray-start-distance` | 原点Cからの前方距離の下限。既定`0.25`、有限の非負数 |
+| `--ray-cluster-cosine` | seedの残差方向とのコサイン閾値。既定`0.7`、範囲`(0,1]` |
+| `--ray-min-cluster-size` | 光線を作る最小クラスタ行数。既定`2`、1以上の整数 |
+| `--limit` | 最大光線数。既定`5`、1以上の整数。各光線のヒット件数は制限しない |
+| `--exclude` | 除外語。複数回指定可。既定は除外なし |
+
+residual-clusterでは`--no-center`、`--vocab`、`--ray-cluster-gap`、`--ray-min-set-size`はエラーです。rayモードでは`--emit-prompt`、`--hypotheses`、`--with-math`や順位付け用の非既定`--method`・`--seed`・`--null-samples`、`--p-min`を併用できません。詳細な引数一覧は`python scripts/third_concept_cli.py --help`で確認できます。
+
+### コーパス形式とエンコード
+
+normal-ray用のJSON配列は、次の行形式を受け付け、混在も可能です。各文字列は空でない必要があります。
+
+- 本文だけの文字列、または`line`だけをキーに持つオブジェクト: `"本文"`、`{"line":"本文"}`
+- 3要素配列、または`a`・`b`・`line`を持つオブジェクト: `["概念1","概念2","本文"]`、`{"a":"概念1","b":"概念2","line":"本文"}`
+
+本文だけの行はその本文、ペア行は`aとb。line`に整形したテキストをエンコードします。出力には元の`a`・`b`・`line`を保持し、本文だけの行の`a`・`b`は`null`です。任意の独自IDや追加メタデータを保持するスキーマではありません。
+
+A・B・Cと**渡された全コーパス行**は、明示除外の適用前に同じ`encoder.encode_passage`経路でエンコードされます。この方式で`encode_query`は使いません。ロールprefixを使う設定では、入力テキスト先頭の既知の`query: ` / `passage: `を取り除いてから、全てに同じpassage prefixを付けます。出力の原文はこの処理で書き換えません。prefix-freeとhashではロールprefixを追加しません。
+
+semanticの`--prefix-policy auto`はモデルIDに`e5`を含む場合にE5のprefixを選び、それ以外はprefixなしです。`e5`または`prefix-free`で上書きできます。未知のモデル固有の指示形式までは自動判定しないため、モデル仕様を確認してください。
+
+### 幾何とヒット条件
+
+A・B・Cのエンコード結果を`a`・`b`・`c`とします。エンコーダが返した座標を使い、コーパス平均による中心化や残差の長さの均一化は行いません。
+
+1. 出典平面を`S = c + span(a-c, b-c)`、`V = span(a-c, b-c)`とします。
+2. コーパス行のベクトル`x`ごとに、生の残差`r = (x-c) - P_V(x-c)`を求めます。
+3. 元のコーパス順に、未割当の最初の有効残差をseedとし、seedとの残差方向コサインが閾値以上の未割当行をまとめます。更新した平均や推移的な近さでは判定しません。同じ順序では決定的ですが、行順を変えるとクラスタも変わりえます。コサイン比較には`1e-12`の許容差があります。
+4. 最小行数を満たすクラスタの**生の残差ベクトルの算術平均を正規化**して単位方向`n`を作り、`c + t n`を光線とします。合成残差がゼロと判定されたクラスタからは光線を作りません。
+5. 明示除外されていない全行について`u = x-c`、前方距離`axial = u·n`、半径方向距離`radial = ||u - axial n||`を計算します。**`axial >= start_distance`かつ`radial <= radius`**を満たす行を返します。どちらの境界も含みますが、浮動小数点の丸めは境界付近に影響します。
+
+距離は生のエンコーダ座標上の距離です。平面内の成分も`radial`に含まれるため、クラスタのメンバーが自動的にヒットするわけではありません。メンバー以外もヒットでき、同じ行が複数の光線に現れる場合もあります。光線はクラスタ行数の降順、同数ならseedの元インデックス順で最大`--limit`本に絞り、各光線のヒットは`radial_distance`、元インデックスの順に並べます。
+
+残差ノルムが内部閾値`min_residual_norm = 1e-9`以下の行はクラスタ化に使わず、`axial`を厳密に`0.0`とし、`radial = ||x-c||`で検索対象に残します。この閾値はCLIでは変更できません。`--ray-start-distance 0`なら平面内の行も半径条件次第でヒットします。極小の開始距離や大きな座標スケールでは、この閾値と丸めの影響に注意してください。同一テキストが常に同一ベクトルになることをsemantic実モデルで確認したわけではありません。
+
+### 出力JSONの読み方
+
+主なキーは次のとおりです。`run.py`の`selected`や旧PCA方式の集合スキーマとは区別してください。
+
+| キー | 内容 |
+| --- | --- |
+| `mode` / `method` | `"normal-ray"` / `"affine_residual_cluster"` |
+| `status` | `hits_found` / `no_hits` / `no_residual_clusters` / `plane_unavailable` |
+| `input` / `encoder` | 元のA・B・C、エンコーダの`name`・`model_id`・`prefix` |
+| `corpus_id` / `corpus_size` | ファイル指定時はファイルバイト列、未指定時は内部行データのJSONをUTF-8化したもののSHA-256先頭16桁と、除外前の行数 |
+| `params` | `coordinates: "raw_encoder_embedding"`、`encoding_path: "encode_passage"`、`origin: "C"`、平面式と検索・除外パラメータ |
+| `plane` | `status`・`origin`・`singular_values`・`dimension`。利用可能なら`basis`、利用不可なら`reason` |
+| `clustering` | 候補数・除外数・有効残差数、`unusable_corpus_indices`、クラスタ数、小クラスタ・ゼロ合成残差・最大本数による省略の件数 |
+| `rays` | 各光線の`ray_id`、`seed_corpus_index`、`member_corpus_indices`、`member_count`、`direction`、`mean_residual`、`resultant_norm`、`coherence`、`hit_count`、`hits` |
+| `rays[].hits[]` | `corpus_index`、`a`、`b`、`line`、`axial_distance`、`radial_distance`、`in_cluster` |
+| `warnings` / `disclaimer` | 警告と、幾何検索の限界の説明 |
+
+出典は`corpus_id`と、除外前の元の行順に対応する0始まりの`corpus_index`で追跡します。`in_cluster`は、そのヒットが当該光線を定めたクラスタに属するかを示します。`coherence = ||sum r|| / sum ||r||`は残差方向の揃い方であり、文章の意味的一貫性ではありません。
+
+`no_hits`は光線があってもヒットがない状態です。`no_residual_clusters`は有効残差がない、最小行数を満たさない、全候補が明示除外されたなど、光線が残らない状態です。平面が作れない場合は`plane_unavailable`となり、`reason`は`embedding_dimension_below_three`、`source_anchors_coincide`、`plane_rank_deficient`のいずれかです。不正な入力・非有限値などの検証エラーは、JSONの状態ではなくCLIのエラー（終了コード2）になります。
+
+### 検索の限界と任意の後処理
+
+意味・関連性・類似度による除外はありません。除外するのは、明示した`--exclude`語をNFKC・casefold・空白除去後の部分一致で含む行だけです。A/B/Cに近い行やC自身の行も幾何条件次第で対象になります。除外語はペア行の`a`・`b`・`line`それぞれに照合します。
+
+半径・開始距離・クラスタ閾値はエンコーダ間で較正されておらず、コーパスと行順にも依存します。空の結果から意味的な不在を結論できません。検索結果も事実確認や因果関係の証拠にはなりません。
+
+必要なら検索後にホストLLMへ、原文と出典IDを保持しつつ解釈・仮説・創作を依頼できます。生成内容は検索された原文と分け、未検証の解釈であると明記します。normal-ray CLI自体はLLMを呼ばず、新しい文や仮説を作りません。
+
+## その他のCLI: 旧来の順位付けとPCA光線
+
+### 4つの順位付け方式（run.py）
+
+既存のスキル実行入口`run.py`と[SKILL.md](skill/crossrag/SKILL.md)の基本フローは、引き続き4方式を扱い、CLIの既定は`wedge`です。以下は`skill/crossrag`から実行します。
 
 ```powershell
-Set-Location skill/crossrag
+python scripts/run.py --context "犬、カレー、夕暮れ" --method similar
 python scripts/run.py --context "犬、カレー、夕暮れ、帰宅" --mode creative --method wedge --limit 5
 python scripts/run.py --context "記憶、法線、検索" --mode discovery --method orthogonal --limit 5
 python scripts/run.py --context "犬、カレー" --mode creative --method similar --encoder hash
 python scripts/run.py --context "犬、カレー" --corpus references/example-corpus.json
-python scripts/third_concept_cli.py --search-mode random-orthogonal --context "雨" --context "時計" --corpus references/example-corpus.json --seed 7 --ray-count 8 --serendipity 60
 ```
 
-`--corpus`に相対パスを渡す場合は、`skill/crossrag`からの相対パスになります。リポジトリ外のユーザーコーパスには絶対パスを使ってください。`--encoder semantic`はsentence-transformersとモデルをローカルに用意した場合だけ指定します。
+- **similar**: 文脈ベクトルの平均と候補文のコサイン類似度。
+- **orthogonal**: 文脈全体が張る空間への射影残差に、コサインの帯域と関連度の重みを混ぜたヒューリスティック。
+- **wedge**: 向き付き双ベクトル`a∧b`と`u∧v`のコサインなどを混ぜた順位。先頭2概念の順序交換で楔積成分の符号は反転しますが、最終順位全体の逆転は保証されません。高次元の一意の3次元法線や言語的な方向を表しません。
+- **random**: 再現可能なハッシュ順位。比較用。
 
-`random-orthogonal`は、複数回指定した`--context`の最初の埋め込みを原点にして、その文脈が張るアフィン部分空間の直交補空間へseed付きGaussian方向を投影し、コーパスを幾何条件で探索する実験モードです。少なくとも2個の`--context`を別々に指定します。`--seed`で方向を再現し、`--ray-count`で試す方向数、`--serendipity`（0〜100、既定60）で探索半径と光線コサイン条件を調整します。値に対応する法則の調子は、0–33が`grounded`（控えめな飛躍）、34–66が`playful`（奇妙な法則）、67–100が`absurd`（徹底的にデタラメな法則）です。境界は整数値で示した範囲に含めます。既定値は半径`0.25 × (0.5 + s)`、コサイン閾値`0.85 − 0.35 × s`（`s = serendipity / 100`）です。出力には再現可能な幾何クラスタとして`selected_clusters`と`combined_clusters`を含みます。候補行と出典情報をそのまま返し、意味的な関連性や品質は判定しません。光線の前向き距離`t`、原点からの半径距離`radial`、光線からの距離`ray_distance`を区別し、原点より後ろの候補は`behind_origin`として示します。有効なrankと1件以上の非除外候補行がある状態で光線チューブにhitがない場合は、最近傍の実在行をsingleton fallbackとして必ず返し、fallbackと明示してチューブhitには数えません。コーパスが空、候補がすべて除外、または有効な直交補空間を定められないrankの場合は、候補を捏造せず利用不能状態を返します。
+`--context`は2つ以上の概念を区切って指定します。`--mode`は`creative`（既定）/ `discovery`で、ホストへ渡す指示を切り替えます。`--method`は数値順位の方式です。`--limit`は選択行数で既定5、実装では1～20に制限されます。`--corpus`は空でない文字列3つのペア行形式だけを受け付け、normal-rayが扱う本文だけの行は使えません。コーパスには2件以上必要です。
 
-既定のcosine閾値はserendipityから写像しますが、`--ray-cluster-cosine`を指定するとその値が明示的に優先されます。JSONの`params.mapped_cosine_threshold`は写像値、`params.cosine_threshold`は実際に使った閾値、`params.cosine_threshold_source`は採用元（`serendipity_mapping`または`explicit_override`）です。例えば`--ray-cluster-cosine 0.5`を付けた場合、写像値を併記したうえで有効値と採用元を記録します。
+出力は`context`・`mode`・`encoder`・`selected`・`total`・`warnings`・`note`と、ホスト向けの`task_mode`・`evidence_type`・`instruction`を持つJSONです。`selected`の各行には`index`・`a`・`b`・`line`・`score`・`cosine`・`orthogonal`・`wedge`が入ります。normal-rayの`rays[].hits[]`とは別の形式です。hashと短い語の組合せでは全候補のwedge成分が0になる場合があるため、`warnings`を確認し、その場合はwedgeが順位に寄与していないと明記します。
 
-法則文を付けない場合、JSONは`awaiting`状態を示し、ホストモデル向けプロンプトに「`この世界が成立する奇妙な法則を一つ作れ`」という指示を含めます。ホストモデルはその指示から法則を作り、同じ引数に`--law`を加えて検索を再実行します。スクリプト自身はLLM/APIを呼びません。READMEの作例は説明用にホストモデルが生成した架空の法則であり、コーパスから検索された文や実行結果ではありません。
+同じエンコーダ、コーパス、生成条件で比較してください。式と限界は[methodology.md](skill/crossrag/references/methodology.md)、ホストLLMの創作・発見の出力の型は[modes.md](skill/crossrag/references/modes.md)にあります。方式名や数値順位だけで性能差を主張しません。
 
-awaiting時の`host_prompt`は単なる文字列ではなくJSONオブジェクトです。`contexts`、`selected_clusters`、`tone`、`tone_instruction`、`guardrails`を構造化フィールドとして持ち、同じ内容をまとめた`prompt`文字列も含みます。`required_directive`にもホストへの必須指示を記録します。
-
-架空のホスト生成法則の例（検索結果でも実行結果でもありません）: 「雨の音が聞こえるものだけが、過去を記憶できる。」再実行時には、この文を同じ検索引数へ`--law`として渡します。
+### 旧PCA×外積の光線（明示選択）
 
 ```powershell
-python scripts/third_concept_cli.py --search-mode random-orthogonal --context "雨" --context "時計" --corpus references/example-corpus.json --seed 7 --ray-count 8 --serendipity 60 --law "雨の音が聞こえるものだけが、過去を記憶できる。"
+python scripts/third_concept_cli.py --A "概念A" --B "概念B" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-method pca-cross --limit 5
 ```
 
-入力不足や不正な値はエラーとして扱います。文脈埋め込みから直交補空間を作れない場合は検索不能の状態を示し、候補がない場合と光線チューブに候補が入らない場合は区別します。有効なrankと非空の非除外候補があるのにチューブhitがない場合は、最近傍の実在行をsingleton fallbackとして必ず返し、fallbackと明示します。コーパスが空、候補がすべて除外、または有効な直交補空間を定められないrankの場合は、利用不能状態を返します。
+`pca-cross`は旧来の中心化PCA・A×Bの向き・前方距離の間隔による集合化・入力に近い候補の除外を保ちます。`--C`、`--ray-cluster-cosine`、`--ray-min-cluster-size`は受け付けません。半径と開始距離は既定`0.25`、`--ray-cluster-gap`は`0.25`、`--ray-min-set-size`は`2`です。この方式の`--limit`は各種類の集合の最大数であり、residual-clusterの光線数とは異なります。JSONには`ray`・`concept_sets`・`passage_sets`があり、状態は`sets_found` / `no_sets` / `ray_unavailable`です。
 
-To inspect corpus passages near rays estimated from residual clusters outside the affine plane through A, B and a source article C, use the experimental normal-ray CLI:
+### 第三概念の候補順位付け
 
-```powershell
-python scripts/third_concept_cli.py --A "概念A" --B "概念B" --C "出典記事" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-cosine 0.7 --ray-min-cluster-size 2 --limit 5
-```
-
-既定の`residual-cluster`方式では、A・B・出典記事Cの埋め込みが定めるアフィン平面から、コーパスの残差を決定的なリーダー方式でクラスタ化し、各クラスタの平均残差方向に光線を定めます。Cは必須です。A・B・Cと全コーパス候補は、単一の`encoder.encode_passage`経路で同じ座標空間に埋め込みます。A・B・Cは入力テキスト、候補は整形済みコーパス行テキスト（ペア行なら例:`aとb。line`）を使い、この方式では`encode_query`を使いません。role prefixを使うエンコーダでは、既知の`query: `または`passage: `ロールprefixがテキスト先頭にあればmarkerとして取り除き、`encode_passage`が全てに同じpassage prefixを付けます。prefix-freeエンコーダではprefixを追加しません。ヒット結果にはコーパスの元のテキストを保持します。出力の`params.encoding_path`は`"encode_passage"`です。意味や関連性の判定、類似度による除外はありません。`--exclude`に一致する行だけを明示的に除外し、平面内に近い残差はクラスタ化できませんが、幾何条件を満たせば検索結果には現れます。A/B/Cに語彙的・意味的に近い行やC自身の行も対象です。光線近傍に条件を満たす実在行がなければ空になります。旧PCA×外積方式は`--ray-method pca-cross`で選べます。距離・クラスタ閾値はエンコーダ間で較正されていません。どちらの方向も意味的事実ではなく、有用性は評価されていません。
-
-標準出力はUTF-8のJSONです。各候補に`cosine`、`orthogonal`、`wedge`と、選んだ手法の順位が入ります。`--mode`はホスト側モデルへ渡す創作・発見の指示、`--method`は候補を並べる数値方式を切り替えます。
-
-| オプション | 意味 |
-| --- | --- |
-| `--context` | カンマ区切りの概念。2つ以上。楔積では先頭2語の順序が向きを決める |
-| `--mode` | `creative`（創作）または `discovery`（発見）。既定は `creative` |
-| `--method` | `similar` / `orthogonal` / `wedge` / `random`。既定は `wedge` |
-| `--encoder` | `hash`（既定）または `semantic` |
-| `--corpus` | `["概念1","概念2","着想"]` または `{"a","b","line"}` の JSON 配列 |
-| `--limit` | 返す件数。既定は 5 |
-
-自前のコーパスは、空でない文字列 3 つを 1 件とします。
-
-## 実験例：料理の記事から、思いがけない方向へ（2026-10-21）
-
-**試したかったこと:** 食材の実食記事から、料理の話を自然に広げるのではなく、元の話の腰を折るような遠いモチーフを拾えるか。元記事は非公開とし、ここでは「普段は脇役の食材が中心になり、火の通り方が違ってもおいしいと感じたが、その理由は分からない」という概要だけを扱います。商品名、記事名、元URL、全文は記載しません。
-
-新しい `normal-ray` の `residual-cluster` 方式で、記事 C と二つの概念 A・B からアフィン平面 `C + span(A-C, B-C)` を作り、既存コーパスの候補を平面からの残差方向でクラスタ化しました。使用したのは **384次元の文字 n-gram hash** と、コード内の **22件の標準コーパス（`engine.DEFAULT_CORPUS`）** です。これは意味埋め込みではありません。なお、`references/example-corpus.json` は別の4件の例示データで、今回の試行には使っていません。
-
-| 入力 | 標準設定（半径0.25、クラスタcosine 0.7） | 緩和設定（半径1.1、クラスタcosine 0.4） |
-| --- | --- | --- |
-| 元記事に基づく非公開入力 | `no_residual_clusters`／光線0本 | `hits_found`／光線6本 |
-| 下記の公開可能な匿名概要入力 | `no_residual_clusters`／光線0本 | `hits_found`／光線4本 |
-
-両方とも `--ray-min-cluster-size 2`（既定値）、`--limit 10` で実行しました。**6本という結果の厳密な再現には非公開の入力文が必要**です。文章を匿名化すると埋め込み座標が変わるため、結果も4本に変わりました。
-
-### 匿名化した入力で試す
-
-リポジトリのルートから `skill/crossrag` に移動し、次を実行します（PythonとNumPyが必要）。
-
-```powershell
-Set-Location skill/crossrag
-$A = "料理の脇役だった食材が主役になる"
-$B = "加熱の程度が違ってもおいしい"
-$C = "ある料理の試食記事。これまで添え物だった食材が料理の中心になり、軽く火を通したときも、柔らかくなるまで加熱したときも魅力がある。なぜおいしいか説明できず、予想外の美味しさに驚いた。"
-
-python scripts/third_concept_cli.py --A $A --B $B --C $C --search-mode ray --encoder hash --limit 10
-
-python scripts/third_concept_cli.py --A $A --B $B --C $C --search-mode ray --encoder hash --ray-cluster-cosine 0.4 --ray-radius 1.1 --limit 10
-```
-
-匿名入力の緩和設定では、例えば次の**既存コーパス由来のペア**が同じ光線の検索結果に現れました（生成された文章ではありません）。
-
-- **時計の針が葉をつける／影が時刻を進める**
-- **夕暮れが帰る人を待つ／終電が言えなかった約束を運ぶ**
-- **焼きたてのパンが秘密をふくらませる／閉館後の図書室で夢が貸し出される**
-
-元記事を使った非公開入力の緩和設定では、このほか **雨粒と自転車**、**傘と猫の地図** などを含む6本の光線ができました。ここからホスト側モデルが、たとえば「昨日に取り残された家には、今日の鍵が使えない」という着想を書けますが、**これは検索結果そのものではなく、その後の創作**です。
-
-### 分かったこと・分からないこと
-
-- 条件次第で、出発記事から遠く感じられるモチーフを**既存データから抽出**できました。
-- ただし緩和した半径は広く、クラスタやヒットが増えたことは「発見性能の向上」や「外積による意味的な発見」の証拠ではありません。このモードは高次元の `A×B` 法線を計算するのではなく、**コーパス残差から光線方向を推定**します。
-- 結果は小規模な創作用コーパス、文字特徴、入力文、閾値、候補の並び順に依存します。意味的な意外性、有用性、再現性、通常の検索やランダム選択に対する優位性は未評価です。
-
-次の検証課題は、同一条件での `similar`／`orthogonal`／`random` などとの比較、意味埋め込み・大規模コーパスへの切替、人間による「話の腰を折られた度合い」の評価です。
-
-## 検索方式
-
-同じエンコーダ、同じコーパス、同じ生成条件で比べてください。条件が違うと比較になりません。
-
-- **similar**: 文脈ベクトルの平均と、候補文のコサイン類似度
-- **orthogonal**: 文脈が張る空間への射影の残差。コサインの帯域と一貫性の重みを混ぜたヒューリスティック
-- **wedge**: 向き付き双ベクトル `a∧b` と `u∧v` のコサイン。先頭2語の順序を入れ替えると符号が反転する。言語的な方向そのものではない
-- **random**: 再現可能なハッシュ順位。対照用
-- **random-orthogonal**: seed付きランダム方向を文脈部分空間の直交補空間へ投影する実験的な幾何探索。意味検索や品質評価ではない
-
-式、限界、評価の置き方は [methodology.md](skill/crossrag/references/methodology.md)、創作と発見の出力の型は [modes.md](skill/crossrag/references/modes.md) にあります。
+`third_concept_cli.py`で`--search-mode ray`を付けない場合は、`third-concept`または`--method third-concept-ratio`による候補順位付けです。出力は`candidates`と`origin`などを持ち、normal-rayの`rays`ではありません。外部LLMの仮説ファイルや比較スクリプトについては[第三概念の設計](docs/third_concept_design.md)を参照してください。この設計文書のquery/passageや中心化の説明は第三概念順位付けのもので、residual-clusterの共通passage経路・生座標とは区別します。
 
 ## 各ホストへの入れ方
 

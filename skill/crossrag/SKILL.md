@@ -1,6 +1,6 @@
 ---
 name: crossrag
-description: Explore concept-corpus motifs for creative writing, metaphors, or cross-domain ideation. Use when a user wants to compare similarity, orthogonal-residual, oriented wedge, random retrieval, or normal-ray geometry. Normal-ray reports corpus items near corpus-derived rays without semantic relevance filtering; other retrieved motifs and scores are heuristic, not facts or proof.
+description: Explore concept-corpus motifs for creative writing, metaphors, or cross-domain ideation. Use when a user wants to compare similarity, orthogonal-residual, oriented wedge, random retrieval, normal-ray geometry, or random-orthogonal serendipity. Normal-ray and random-orthogonal report corpus items near geometric directions without semantic relevance filtering; other retrieved motifs and scores are heuristic, not facts or proof.
 license: MIT
 compatibility: Requires Python 3.10+ and NumPy for local retrieval. Semantic mode additionally needs sentence-transformers and a locally available model.
 ---

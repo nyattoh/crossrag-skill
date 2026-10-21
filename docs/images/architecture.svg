@@ -1,104 +1,207 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1160" viewBox="0 0 1200 1160" role="img" aria-labelledby="title desc">
-<title id="title">CrossRAG: one corpus, four retrieval routes, a separate writer</title>
-<desc id="desc">Two or more ordered context concepts and a corpus of concept pairs with motif text share one encoder. The default is offline signed character n-gram hashing, not semantic embeddings; multilingual E5 via SentenceTransformer is optional. Four alternative ranking methods are similarity to the mean context vector, projection residual from the context span with blended weights, oriented bivector cosine with blended weights, and deterministic hash ranking as a control. Geometric drawings are schematic: oriented planes in higher dimensions do not define a unique three-dimensional normal. The selected method returns JSON motifs and scores. A separate host LLM writes creative prose or unverified hypotheses. These heuristic rankings do not establish improved creativity or discovery and retrieved motifs are not factual evidence.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1580" viewBox="0 0 1200 1580" role="img" aria-labelledby="title desc" xml:lang="ja">
+<title id="title">CrossRAG: 残差クラスター法線レイパイプライン（normal-ray / affine_residual_cluster）</title>
+<desc id="desc">概念 A・B、ソース C、および供給コーパスの各行はすべて同一の encoder.encode_passage 経路でベクトル化される。アフィン平面 S は c から span(a-c, b-c) 上に定義され、各候補 x の生残差は r=(x-c)-P_V(x-c)。利用可能なコーパス残差から決定論的シード・コサイン方向クラスターが形成され、条件を満たすクラスターの生残差平均を正規化して C 原点のレイ方向とする。実コーパス全体に対し inclusive な軸距離 t が start_distance 以上かつ半径距離が radius 以下の行が幾何ヒットとして出力される。クラスター所属は in_cluster フラグのみで、メンバーが自動的にヒットとは限らない。意味・関連性フィルタや生成は行わない。run.py の既定は wedge だが normal-ray モードの既定は residual-cluster。similar / orthogonal / wedge / random および pca-cross は副次的。高次元の模式図であり、3 次元交差積や一意の法線を示唆しない。既定エンコーダはオフライン文字 n-gram ハッシュで、意味埋め込みではない。</desc>
 <defs>
-<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#3058c9"/></marker>
-<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#147c78"/></marker>
-<marker id="gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#a66920"/></marker>
+  <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10Z" fill="#1a4a8a"/>
+  </marker>
+  <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10Z" fill="#0d6b62"/>
+  </marker>
+  <marker id="arrow-gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10Z" fill="#8a5a12"/>
+  </marker>
+  <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+    <line x1="0" y1="0" x2="0" y2="8" stroke="#c8d4dc" stroke-width="2"/>
+  </pattern>
 </defs>
-<rect width="1200" height="1160" rx="24" fill="#f8f7f2"/>
-<g font-family="DejaVu Sans, Arial, sans-serif">
-<text x="40" y="42" font-size="14" fill="#3058c9" font-weight="700" text-anchor="start">CROSSRAG / EXPERIMENTAL RETRIEVAL</text>
-<text x="40" y="87" font-size="34" fill="#172a3a" font-weight="700" text-anchor="start">One corpus. Four ways to find a motif.</text>
-<text x="40" y="120" font-size="18" fill="#506374" font-weight="400" text-anchor="start">Local numerical retrieval supplies material; the receiving model writes the text.</text>
-<rect x="40" y="151" width="390" height="145" rx="16" fill="#142e45" stroke="#142e45"/>
-<text x="62" y="179" font-size="13" fill="#92cfd9" font-weight="700" text-anchor="start">01 / INPUTS</text>
-<text x="62" y="211" font-size="22" fill="#ffffff" font-weight="700" text-anchor="start">Ordered context concepts</text>
-<text x="62" y="237" font-size="16" fill="#d5e4eb" font-weight="400" text-anchor="start">2+ anchors; first two orient the wedge</text>
-<text x="62" y="273" font-size="18" fill="#ffffff" font-weight="400" text-anchor="start">+ Corpus: concept pair + motif text</text>
-<path d="M443 224 H495" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
-<rect x="512" y="151" width="648" height="145" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
-<text x="534" y="179" font-size="13" fill="#3058c9" font-weight="700" text-anchor="start">02 / ONE SHARED ENCODER</text>
-<text x="534" y="210" font-size="22" fill="#172a3a" font-weight="700" text-anchor="start">Context · candidate text · concept pairs</text>
-<text x="534" y="240" font-size="17" fill="#506374" font-weight="400" text-anchor="start">Default: signed character n-gram hashing (offline)</text>
-<text x="534" y="270" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Optional: semantic embeddings via SentenceTransformer / E5</text>
-<path d="M835 296 V322 H600 V348" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
-<text x="40" y="335" font-size="13" fill="#3058c9" font-weight="700" text-anchor="start">03 / CHOOSE A RANKING METHOD</text>
-<text x="1160" y="335" font-size="15" fill="#506374" font-weight="400" text-anchor="end">Same encoder + corpus for comparisons</text>
-<rect x="40" y="364" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
-<rect x="612" y="364" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
-<rect x="40" y="604" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
-<rect x="612" y="604" width="548" height="222" rx="16" fill="#ffffff" stroke="#d5e0e5"/>
-<text x="62" y="398" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">SIMILAR</text>
-<path d="M90 530 L226 470" fill="none" stroke="#3058c9" stroke-width="3" marker-end="url(#blue)"/>
-<path d="M90 530 L213 437" fill="none" stroke="#147c78" stroke-width="3" marker-end="url(#teal)"/>
-<path d="M137 509 Q137 493 128 501" fill="none" stroke="#a66920" stroke-width="2"/>
-<text x="206" y="492" font-size="13" fill="#3058c9" font-weight="400" text-anchor="start">mean</text>
-<text x="192" y="425" font-size="13" fill="#147c78" font-weight="400" text-anchor="start">candidate</text>
-<circle cx="90" cy="530" r="4" fill="#172a3a"/>
-<text x="278" y="443" font-size="21" fill="#172a3a" font-weight="700" text-anchor="start">Near the context</text>
-<text x="278" y="474" font-size="17" fill="#506374" font-weight="400" text-anchor="start">Cosine to the mean</text>
-<text x="278" y="499" font-size="17" fill="#506374" font-weight="400" text-anchor="start">context vector</text>
-<text x="278" y="548" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">Similarity baseline</text>
-<text x="634" y="398" font-size="15" fill="#147c78" font-weight="700" text-anchor="start">ORTHOGONAL</text>
-<polygon points="648,528 771,548 848,490 725,470" fill="#e2eeef" stroke="#96bcbc" stroke-width="1.5"/>
-<path d="M674 523 L777 502" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
-<path d="M674 523 L777 425" fill="none" stroke="#147c78" stroke-width="2.5" marker-end="url(#teal)"/>
-<path d="M777 502 L777 425" fill="none" stroke="#a66920" stroke-width="3" marker-end="url(#gold)"/>
-<path d="M777 490 L765 493 L765 505" fill="none" stroke="#a66920" stroke-width="1.5"/>
-<circle cx="777" cy="502" r="4" fill="#3058c9"/>
-<text x="785" y="456" font-size="12" fill="#a66920" font-weight="400" text-anchor="start">residual</text>
-<text x="679" y="567" font-size="12" fill="#506374" font-weight="400" text-anchor="start">context span (schematic)</text>
-<text x="880" y="443" font-size="20" fill="#172a3a" font-weight="700" text-anchor="start">Beyond the span</text>
-<text x="880" y="474" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Projection residual</text>
-<text x="880" y="499" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ cosine-band</text>
-<text x="880" y="524" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ coherence weights</text>
-<text x="62" y="638" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">WEDGE</text>
-<polygon points="78,754 165,775 224,731 137,710" fill="#e2e9fb" stroke="#3058c9" stroke-width="1.5"/>
-<path d="M78 754 L165 775" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
-<path d="M78 754 L137 710" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
-<path d="M124 744 C147 729 181 746 161 756" fill="none" stroke="#3058c9" stroke-width="2" marker-end="url(#blue)"/>
-<text x="83" y="797" font-size="15" fill="#3058c9" font-weight="700" text-anchor="start">a ∧ b</text>
-<polygon points="178,696 249,719 272,661 201,638" fill="#dcf0eb" stroke="#147c78" stroke-width="1.5"/>
-<path d="M178 696 L249 719" fill="none" stroke="#147c78" stroke-width="2" marker-end="url(#teal)"/>
-<path d="M178 696 L201 638" fill="none" stroke="#147c78" stroke-width="2" marker-end="url(#teal)"/>
-<path d="M206 689 C203 666 240 666 238 690" fill="none" stroke="#147c78" stroke-width="2" marker-end="url(#teal)"/>
-<text x="234" y="644" font-size="15" fill="#147c78" font-weight="700" text-anchor="start">u ∧ v</text>
-<text x="298" y="683" font-size="20" fill="#172a3a" font-weight="700" text-anchor="start">Compare orientation</text>
-<text x="298" y="714" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Oriented bivector cosine</text>
-<text x="298" y="739" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ cosine-band</text>
-<text x="298" y="764" font-size="16" fill="#506374" font-weight="400" text-anchor="start">+ coherence weights</text>
-<text x="298" y="798" font-size="13" fill="#3058c9" font-weight="400" text-anchor="start">Planes, not a unique 3D normal</text>
-<text x="634" y="638" font-size="15" fill="#a66920" font-weight="700" text-anchor="start">RANDOM</text>
-<circle cx="672" cy="691" r="7" fill="#d4dce3"/>
-<circle cx="726" cy="672" r="10" fill="#a66920"/>
-<circle cx="803" cy="701" r="7" fill="#d4dce3"/>
-<circle cx="692" cy="758" r="10" fill="#3058c9"/>
-<circle cx="769" cy="747" r="10" fill="#147c78"/>
-<circle cx="815" cy="789" r="7" fill="#d4dce3"/>
-<circle cx="649" cy="801" r="7" fill="#d4dce3"/>
-<text x="722" y="676" font-size="11" fill="#ffffff" font-weight="700" text-anchor="start">1</text>
-<text x="688" y="762" font-size="11" fill="#ffffff" font-weight="700" text-anchor="start">3</text>
-<text x="765" y="751" font-size="11" fill="#ffffff" font-weight="700" text-anchor="start">2</text>
-<text x="880" y="683" font-size="20" fill="#172a3a" font-weight="700" text-anchor="start">A control route</text>
-<text x="880" y="714" font-size="17" fill="#506374" font-weight="400" text-anchor="start">Deterministic hash</text>
-<text x="880" y="739" font-size="17" fill="#506374" font-weight="400" text-anchor="start">ranking</text>
-<text x="880" y="789" font-size="14" fill="#a66920" font-weight="700" text-anchor="start">Reproducible comparison</text>
-<path d="M600 834 V864 H298 V884" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
-<text x="618" y="855" font-size="15" fill="#506374" font-weight="400" text-anchor="start">Selected method → ranked results</text>
-<rect x="40" y="893" width="484" height="141" rx="16" fill="#eef2f6" stroke="#d5e0e5"/>
-<text x="62" y="920" font-size="13" fill="#3058c9" font-weight="700" text-anchor="start">04 / JSON OUTPUT</text>
-<text x="62" y="951" font-size="21" fill="#172a3a" font-weight="700" text-anchor="start">Retrieved motifs + numerical scores</text>
-<text x="62" y="980" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Concept pairs · source text · selected score</text>
-<text x="62" y="1009" font-size="16" fill="#506374" font-weight="400" text-anchor="start">Cosine · orthogonal residual · wedge cosine</text>
-<path d="M541 964 H652" fill="none" stroke="#3058c9" stroke-width="2.5" marker-end="url(#blue)"/>
-<path d="M600 891 V1034" fill="none" stroke="#99a9b6" stroke-width="1.5" stroke-dasharray="5 6"/>
-<rect x="677" y="893" width="483" height="141" rx="16" fill="#142e45" stroke="#142e45"/>
-<text x="699" y="920" font-size="13" fill="#92cfd9" font-weight="700" text-anchor="start">05 / SEPARATE HOST LLM</text>
-<text x="699" y="952" font-size="23" fill="#ffffff" font-weight="700" text-anchor="start">Writes from retrieved material</text>
-<text x="699" y="982" font-size="17" fill="#d5e4eb" font-weight="400" text-anchor="start">Creative prose or unverified hypotheses</text>
-<text x="699" y="1011" font-size="16" fill="#d5e4eb" font-weight="400" text-anchor="start">Retrieval itself does not generate prose</text>
-<text x="40" y="1072" font-size="13" fill="#506374" font-weight="400" text-anchor="start">Geometry is schematic. Swapping the first two anchors flips the wedge component, not necessarily the blended ranking.</text>
-<text x="40" y="1098" font-size="15" fill="#172a3a" font-weight="700" text-anchor="start">Heuristic ranks ≠ proven creativity or discovery benefits. Motifs are inspiration, not verified factual evidence.</text>
-<text x="40" y="1130" font-size="13" fill="#506374" font-weight="400" text-anchor="start">Reference prototype · main 93396d8f · HashEncoder is not a semantic embedding model</text>
-</g></svg>
+<style>
+  .layout-desktop { display: block; }
+  .layout-mobile { display: none; }
+  @media (max-width: 767px) {
+    .layout-desktop { display: none; }
+    .layout-mobile { display: block; }
+  }
+</style>
+
+<rect width="1200" height="1580" rx="20" fill="#f6f8fa"/>
+
+<g class="layout-desktop" font-family="'Yu Gothic UI','Yu Gothic','Hiragino Sans','Segoe UI',sans-serif">
+
+<!-- Header -->
+<text x="48" y="44" font-size="14" fill="#1a4a8a" font-weight="700">CROSSRAG / NORMAL-RAY（残差クラスター）</text>
+<text x="48" y="88" font-size="32" fill="#0f2438" font-weight="700">共有 encode_passage → 残差クラスター → レイ管フィルタ</text>
+<text x="48" y="122" font-size="17" fill="#3d5166">数値幾何によるコーパス参照のみ。意味判定・生成・捏造は行わない（ゼロ件も正当）。</text>
+
+<!-- Stage 01 -->
+<rect x="48" y="148" width="1104" height="118" rx="14" fill="#0f2438"/>
+<text x="72" y="178" font-size="13" fill="#7ec8d4" font-weight="700">01 / 入力</text>
+<text x="72" y="212" font-size="22" fill="#ffffff" font-weight="700">概念 A・B ／ ソース記事 C ／ 供給コーパス各行</text>
+<text x="72" y="244" font-size="16" fill="#d8e8ef">ペア行は a・b・line（例: 「aとb。line」）。明示 --exclude のみ行を除外。</text>
+
+<path d="M600 266 V292" fill="none" stroke="#1a4a8a" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+<!-- Stage 02 -->
+<rect x="48" y="292" width="1104" height="112" rx="14" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="72" y="322" font-size="13" fill="#1a4a8a" font-weight="700">02 / 単一共通エンコーダ</text>
+<text x="72" y="356" font-size="21" fill="#0f2438" font-weight="700">A・B・C と全コーパス候補 → encoder.encode_passage（1 座標系）</text>
+<text x="72" y="386" font-size="16" fill="#3d5166">既定: オフライン符号付き文字 n-gram ハッシュ（意味埋め込みではない）／ 任意: SentenceTransformer</text>
+
+<path d="M600 404 V430" fill="none" stroke="#1a4a8a" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+<!-- Stage 03 + inset row -->
+<text x="48" y="458" font-size="13" fill="#1a4a8a" font-weight="700">03 / アフィン平面と生残差</text>
+
+<rect x="48" y="472" width="640" height="200" rx="14" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="72" y="504" font-size="18" fill="#0f2438" font-weight="700">S = c + span(a−c, b−c)</text>
+<text x="72" y="534" font-size="16" fill="#3d5166">原点 C（レイの起点）。V = span(a−c, b−c)。</text>
+<text x="72" y="568" font-size="17" fill="#0d6b62" font-weight="700">r(x) = (x−c) − P_V(x−c)</text>
+<text x="72" y="598" font-size="15" fill="#3d5166">生残差（平面 S 直交成分）。中心化しない。</text>
+<text x="72" y="628" font-size="14" fill="#5a6a78">‖r‖ ≤ min_residual_norm → 平面内（クラスター不可・管フィルタ対象は継続）</text>
+<text x="72" y="656" font-size="14" fill="#8a5a12" font-weight="600">平面不可用: 次元&lt;3 / 錨一致 / ランク不足</text>
+
+<!-- Geometric inset -->
+<rect x="712" y="472" width="440" height="200" rx="14" fill="#eef4f8" stroke="#96b0c0" stroke-width="2"/>
+<text x="732" y="498" font-size="12" fill="#1a4a8a" font-weight="700">幾何インセット（低次元模式）</text>
+<text x="732" y="518" font-size="11" fill="#5a6a78" font-weight="600">※ 実装は高次元。一意の 3D 法線・A×B 交差積を示唆しない</text>
+<text x="732" y="538" font-size="10" fill="#1a4a8a">管（模式）</text>
+<text x="732" y="552" font-size="10" fill="#1a4a8a">t ≥ start · ρ ≤ radius</text>
+<!-- A projection of one selected normal direction; the detailed maths is in normal-ray-geometry.svg. -->
+<polygon points="760,634 860,654 940,594 840,574" fill="url(#hatch)" stroke="#5a8aa8" stroke-width="1.5"/>
+<line x1="800" y1="612" x2="860" y2="644" stroke="#1a4a8a" stroke-width="2"/>
+<line x1="800" y1="612" x2="850" y2="590" stroke="#1a4a8a" stroke-width="2"/>
+<circle cx="800" cy="612" r="5" fill="#0d6b62" stroke="#0f2438" stroke-width="1.5"/>
+<text x="780" y="630" font-size="13" fill="#0d6b62" font-weight="700">C</text>
+<circle cx="860" cy="644" r="4" fill="#1a4a8a"/>
+<text x="869" y="651" font-size="12" fill="#1a4a8a" font-weight="700">A</text>
+<circle cx="850" cy="590" r="4" fill="#1a4a8a"/>
+<text x="839" y="582" font-size="12" fill="#1a4a8a" font-weight="700">B</text>
+<line x1="800" y1="612" x2="800" y2="556" stroke="#0d6b62" stroke-width="2.5" marker-end="url(#arrow-teal)"/>
+<text x="810" y="565" font-size="11" fill="#0d6b62" font-weight="700">レイ n</text>
+<ellipse cx="800" cy="582" rx="13" ry="5" fill="none" stroke="#1a4a8a" stroke-width="1.5"/>
+<line x1="870" y1="610" x2="870" y2="563" stroke="#8a5a12" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrow-gold)"/>
+<circle cx="870" cy="610" r="3" fill="#8a5a12"/>
+<text x="882" y="589" font-size="11" fill="#8a5a12">残差 r</text>
+
+<path d="M368 672 V698 H600 V724" fill="none" stroke="#1a4a8a" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+<!-- Stage 04 -->
+<rect x="48" y="724" width="1104" height="118" rx="14" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="72" y="754" font-size="13" fill="#1a4a8a" font-weight="700">04 / 決定論的残差方向クラスター</text>
+<text x="72" y="788" font-size="20" fill="#0f2438" font-weight="700">コーパス順・シード先頭：未割当最小 index がシード → コサイン ≥ cluster_cosine で加入</text>
+<text x="72" y="818" font-size="16" fill="#3d5166">min_cluster_size 未満はレイ不生成。zero resultant クラスターも破棄。順序依存だが再現可能。</text>
+
+<path d="M600 842 V868" fill="none" stroke="#0d6b62" stroke-width="2.5" marker-end="url(#arrow-teal)"/>
+
+<!-- Stage 05 -->
+<rect x="48" y="868" width="1104" height="100" rx="14" fill="#e8f5f3" stroke="#0d6b62" stroke-width="2"/>
+<text x="72" y="898" font-size="13" fill="#0d6b62" font-weight="700">05 / C 原点のレイ方向（クラスターごと）</text>
+<text x="72" y="932" font-size="20" fill="#0f2438" font-weight="700">メンバー生残差の算術平均 → 正規化 = 単位方向 n（A×B 交差積ではない）</text>
+<text x="72" y="958" font-size="15" fill="#3d5166">mean_residual・resultant_norm・coherence を記録。--limit でレイ本数上限。</text>
+
+<path d="M600 968 V994" fill="none" stroke="#1a4a8a" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+<!-- Stage 06 -->
+<rect x="48" y="994" width="1104" height="130" rx="14" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="72" y="1024" font-size="13" fill="#1a4a8a" font-weight="700">06 / 実コーパス管フィルタ（全候補・クラスター外も対象）</text>
+<text x="72" y="1058" font-size="19" fill="#0f2438" font-weight="700">u = x−c　t = u·n（軸距離）　ρ = ‖u − t n‖（半径距離）</text>
+<text x="72" y="1088" font-size="17" fill="#0d6b62" font-weight="700">ヒット条件（ inclusive ）: t ≥ start_distance かつ ρ ≤ radius</text>
+<text x="72" y="1112" font-size="15" fill="#3d5166">クラスター member ≠ 自動ヒット。無関係行も幾何上ヒットしうる。</text>
+
+<path d="M600 1124 V1150" fill="none" stroke="#1a4a8a" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+<!-- Stage 07 -->
+<rect x="48" y="1150" width="540" height="148" rx="14" fill="#eef2f6" stroke="#b8c8d4" stroke-width="2"/>
+<text x="72" y="1180" font-size="13" fill="#1a4a8a" font-weight="700">07 / 由来 JSON（third_concept_cli --search-mode ray）</text>
+<text x="72" y="1214" font-size="19" fill="#0f2438" font-weight="700">mode: normal-ray / method: affine_residual_cluster</text>
+<text x="72" y="1244" font-size="15" fill="#3d5166">hits: corpus_index, a, b, line, axial_distance, radial_distance, in_cluster</text>
+<text x="72" y="1272" font-size="14" fill="#5a6a78">status: hits_found | no_hits | no_residual_clusters | plane_unavailable</text>
+
+<!-- Stage 08 separate -->
+<path d="M588 1224 H612" fill="none" stroke="#96a8b8" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-blue)"/>
+<rect x="612" y="1150" width="540" height="148" rx="14" fill="#0f2438"/>
+<text x="636" y="1180" font-size="13" fill="#7ec8d4" font-weight="700">08 / 任意・下流（別系統）</text>
+<text x="636" y="1214" font-size="21" fill="#ffffff" font-weight="700">ホスト LLM による解釈・執筆</text>
+<text x="636" y="1248" font-size="16" fill="#d8e8ef">本パイプラインは JSON を返すのみ。創作・仮説提示は受け手側。</text>
+<text x="636" y="1276" font-size="14" fill="#a8c4d0">run.py（wedge 等）の CLI・出力スキーマとは別。</text>
+
+<!-- Footer disclaimers -->
+<rect x="48" y="1320" width="1104" height="228" rx="12" fill="#faf3e8" stroke="#d4b896" stroke-width="1.5"/>
+<text x="72" y="1350" font-size="13" fill="#8a5a12" font-weight="700">副次経路（主フローに混ぜない）</text>
+<text x="72" y="1378" font-size="15" fill="#3d5166">run.py 全体既定: method=wedge（similar / orthogonal / wedge / random）。</text>
+<text x="72" y="1402" font-size="15" fill="#3d5166">third_concept_cli の --ray-method pca-cross はレガシー。</text>
+<text x="72" y="1426" font-size="15" fill="#3d5166">（C 不要・ centred PCA / A×B 法線）</text>
+<text x="72" y="1450" font-size="14" fill="#5a6a78">normal-ray 既定のみ --ray-method residual-cluster（--C 必須）。</text>
+<text x="72" y="1474" font-size="14" fill="#5a6a78">幾何は模式図。ヒューリスティック ≠ 創造性・発見の実証。モチーフは事実証拠ではない。</text>
+
+<text x="72" y="1508" font-size="12" fill="#5a6a78">HashEncoder = 再現可能な文字 n-gram 表現（意味モデルではない）</text>
+<text x="72" y="1530" font-size="12" fill="#5a6a78">参照: skill/crossrag/scripts/residual_ray.py</text>
+
+</g>
+
+<!-- Compact mobile layout: larger SVG-unit type (~14px CSS at 360px viewport) -->
+<g class="layout-mobile" font-family="'Yu Gothic UI','Yu Gothic','Hiragino Sans','Segoe UI',sans-serif">
+
+<text x="40" y="52" font-size="28" fill="#1a4a8a" font-weight="700">CROSSRAG · NORMAL-RAY</text>
+<text x="40" y="108" font-size="48" fill="#0f2438" font-weight="700">encode → 残差クラスター → 管</text>
+<text x="40" y="158" font-size="36" fill="#3d5166">幾何参照のみ。意味・生成なし（0件可）</text>
+
+<path d="M600 178 V198" fill="none" stroke="#1a4a8a" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+<rect x="32" y="208" width="1136" height="108" rx="12" fill="#0f2438"/>
+<text x="52" y="248" font-size="26" fill="#7ec8d4" font-weight="700">01 入力</text>
+<text x="52" y="296" font-size="38" fill="#ffffff" font-weight="700">A・B・C と供給コーパス各行</text>
+
+<path d="M600 326 V346" fill="none" stroke="#1a4a8a" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+<rect x="32" y="356" width="1136" height="132" rx="12" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="52" y="396" font-size="26" fill="#1a4a8a" font-weight="700">02 共通 encode_passage</text>
+<text x="52" y="444" font-size="36" fill="#0f2438" font-weight="700">1 座標系で A/B/C/候補を符号化</text>
+<text x="52" y="484" font-size="32" fill="#3d5166">既定: 文字 n-gram ハッシュ（非意味）</text>
+
+<path d="M600 498 V518" fill="none" stroke="#1a4a8a" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+<rect x="32" y="528" width="1136" height="168" rx="12" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="52" y="568" font-size="26" fill="#1a4a8a" font-weight="700">03 平面 S と生残差</text>
+<text x="52" y="616" font-size="36" fill="#0f2438" font-weight="700">S = c + span(a−c, b−c)</text>
+<text x="52" y="660" font-size="38" fill="#0d6b62" font-weight="700">r = (x−c) − P_V(x−c)</text>
+<text x="52" y="688" font-size="30" fill="#5a6a78">高次元模式。一意法線・A×B 交差積ではない</text>
+
+<path d="M600 706 V726" fill="none" stroke="#0d6b62" stroke-width="3" marker-end="url(#arrow-teal)"/>
+
+<rect x="32" y="736" width="1136" height="120" rx="12" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="52" y="776" font-size="26" fill="#1a4a8a" font-weight="700">04 残差方向クラスター</text>
+<text x="52" y="824" font-size="34" fill="#0f2438" font-weight="700">決定論的シード + コサイン閾値</text>
+<text x="52" y="864" font-size="30" fill="#3d5166">min_cluster_size 未満はレイなし</text>
+
+<path d="M600 866 V886" fill="none" stroke="#0d6b62" stroke-width="3" marker-end="url(#arrow-teal)"/>
+
+<rect x="32" y="896" width="1136" height="108" rx="12" fill="#e8f5f3" stroke="#0d6b62" stroke-width="2"/>
+<text x="52" y="936" font-size="26" fill="#0d6b62" font-weight="700">05 C 原点レイ</text>
+<text x="52" y="984" font-size="36" fill="#0f2438" font-weight="700">生残差平均 → 正規化方向 n</text>
+
+<path d="M600 1014 V1034" fill="none" stroke="#1a4a8a" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+<rect x="32" y="1044" width="1136" height="156" rx="12" fill="#ffffff" stroke="#b8c8d4" stroke-width="2"/>
+<text x="52" y="1084" font-size="26" fill="#1a4a8a" font-weight="700">06 全コーパス管フィルタ</text>
+<text x="52" y="1132" font-size="34" fill="#0f2438" font-weight="700">t ≥ start かつ ρ ≤ radius（ inclusive ）</text>
+<text x="52" y="1188" font-size="28" fill="#0d6b62" font-weight="700">in_cluster ≠ 自動ヒット · 無関係行も幾何ヒット可</text>
+
+<path d="M600 1204 V1224" fill="none" stroke="#1a4a8a" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+<rect x="32" y="1234" width="1136" height="100" rx="12" fill="#eef2f6" stroke="#b8c8d4" stroke-width="2"/>
+<text x="52" y="1274" font-size="26" fill="#1a4a8a" font-weight="700">07 出力 JSON</text>
+<text x="52" y="1322" font-size="34" fill="#0f2438" font-weight="700">normal-ray / affine_residual_cluster</text>
+
+<path d="M600 1344 V1364" fill="none" stroke="#96a8b8" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow-blue)"/>
+
+<rect x="32" y="1374" width="1136" height="88" rx="12" fill="#0f2438"/>
+<text x="52" y="1414" font-size="26" fill="#7ec8d4" font-weight="700">08 任意 · 別系統</text>
+<text x="52" y="1458" font-size="36" fill="#ffffff" font-weight="700">ホスト LLM（本管は JSON のみ）</text>
+
+<rect x="32" y="1478" width="1136" height="88" rx="10" fill="#faf3e8" stroke="#d4b896" stroke-width="1.5"/>
+<text x="52" y="1518" font-size="28" fill="#8a5a12" font-weight="700">副次: run.py wedge 既定 · pca-cross レガシー</text>
+<text x="52" y="1554" font-size="26" fill="#5a6a78">normal-ray 既定 = residual-cluster（--C 必須）</text>
+
+</g>
+</svg>

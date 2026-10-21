@@ -6,3 +6,4 @@ venv/
 .cursorindexingignore
 *.egg-info/
 .pytest_cache/
+.vscode/

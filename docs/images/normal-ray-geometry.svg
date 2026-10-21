@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1200" viewBox="0 0 1080 1200" role="img" aria-labelledby="math-title math-desc" xml:lang="ja">
+  <title id="math-title">CrossRAGの数学：アフィン射影、残差方向の平均、光線近傍の判定</title>
+  <desc id="math-desc">上段はCを通る平面への直交射影と残差の模式図。中段は4次元の解析例で、平面の直交補空間をe3とe4の2軸で正確に表示し、残差(2,1)と(4,1)の生の平均(3,1)から単位法線を求める。下段は同じ例の前方距離tと半径方向距離rho。半径0.5、開始距離0.25なら、x1は管の外、x2は管の内となる。クラスタ所属とヒットは別の条件である。</desc>
+  <defs>
+    <marker id="math-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#2355a0"/></marker>
+    <marker id="math-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#087f75"/></marker>
+    <marker id="math-gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#a26813"/></marker>
+    <marker id="math-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7b8b9c"/></marker>
+  </defs>
+  <style>
+    text{font-family:'Yu Gothic UI','Yu Gothic','Hiragino Sans',sans-serif;fill:#183046;font-size:19px}
+    .h{font-size:25px;font-weight:700}.k{font-size:17px;fill:#52697e}.eq{font-family:'Cambria Math','Segoe UI',sans-serif;font-size:24px}.blue{fill:#2355a0}.teal{fill:#087f75}.gold{fill:#986010}.small{font-size:16px}
+  </style>
+  <rect width="1080" height="1200" rx="20" fill="#f4f7fa"/>
+  <text x="40" y="48" class="h">CrossRAG / 平面から外れる方向を、コーパスから求める</text>
+  <text x="40" y="81" class="k">① 射影を引く → ② 生の残差を平均する → ③ 光線の周辺にある実在行を調べる</text>
+
+  <rect x="24" y="104" width="1032" height="318" rx="16" fill="white" stroke="#c9d7e3"/>
+  <text x="44" y="143" class="h">1　平面への直交射影と残差</text>
+  <polygon points="70,347 290,388 465,306 245,265" fill="#e6eefc" stroke="#7999c7" stroke-width="2"/>
+  <text x="76" y="379" class="blue">平面 S</text>
+  <circle cx="206" cy="334" r="5" fill="#183046"/>
+  <text x="176" y="354">c</text>
+  <circle cx="316" cy="354" r="4" fill="#2355a0"/><text x="320" y="378">a</text>
+  <circle cx="316" cy="283" r="4" fill="#2355a0"/><text x="325" y="280">b</text>
+  <line x1="206" y1="334" x2="316" y2="354" stroke="#2355a0" stroke-width="2"/>
+  <line x1="206" y1="334" x2="316" y2="283" stroke="#2355a0" stroke-width="2"/>
+  <line x1="206" y1="334" x2="374" y2="329" stroke="#2355a0" stroke-width="3" marker-end="url(#math-blue)"/>
+  <text x="216" y="316" class="small blue">P_V(x−c)</text>
+  <circle cx="374" cy="329" r="5" fill="#2355a0"/>
+  <text x="388" y="349" class="small">q</text>
+  <line x1="374" y1="329" x2="374" y2="208" stroke="#087f75" stroke-width="4" marker-end="url(#math-teal)"/>
+  <circle cx="374" cy="208" r="6" fill="#087f75"/>
+  <text x="388" y="208">x</text>
+  <text x="389" y="270" class="teal">r = x−q</text>
+  <path d="M359 329 V314 H374" fill="none" stroke="#087f75" stroke-width="2"/>
+  <text x="520" y="204" class="eq">V = span(a−c, b−c)</text>
+  <text x="520" y="246" class="eq">S = c + V</text>
+  <text x="520" y="288" class="eq blue">q = c + P_V(x−c)</text>
+  <text x="520" y="330" class="eq teal">r = (x−c) − P_V(x−c)</text>
+  <text x="520" y="372" class="eq teal">r ⟂ V</text>
+  <text x="44" y="405" class="k small">上段は射影の模式図。高次元では法線は一意ではなく、下段のように候補の分布から方向を選ぶ。</text>
+
+  <rect x="24" y="442" width="1032" height="358" rx="16" fill="white" stroke="#c9d7e3"/>
+  <text x="44" y="482" class="h">2　直交補空間で、残差方向を集めて平均する</text>
+  <text x="44" y="513" class="k">解析例（4次元）：c = (1,1,0,0)、a = c+e₁、b = c+e₂。V⊥ = span(e₃,e₄)。</text>
+  <line x1="85" y1="714" x2="470" y2="714" stroke="#7b8b9c" stroke-width="2" marker-end="url(#math-grey)"/>
+  <line x1="85" y1="714" x2="85" y2="549" stroke="#7b8b9c" stroke-width="2" marker-end="url(#math-grey)"/>
+  <text x="478" y="721" class="small">e₃</text><text x="60" y="551" class="small">e₄</text>
+  <text x="59" y="737" class="small">0</text>
+  <line x1="85" y1="634" x2="405" y2="634" stroke="#d5dee7" stroke-dasharray="5 5"/>
+  <path d="M245 634 L405 634" stroke="#c39b58" stroke-width="10" opacity=".25"/>
+  <line x1="85" y1="714" x2="245" y2="634" stroke="#2355a0" stroke-width="3" marker-end="url(#math-blue)"/>
+  <line x1="85" y1="714" x2="405" y2="634" stroke="#2355a0" stroke-width="3" marker-end="url(#math-blue)"/>
+  <text x="210" y="611" class="blue">r₁ = (2,1)</text><text x="367" y="611" class="blue">r₂ = (4,1)</text>
+  <line x1="85" y1="714" x2="325" y2="634" stroke="#a26813" stroke-width="4" marker-end="url(#math-gold)"/>
+  <circle cx="325" cy="634" r="5" fill="#a26813"/>
+  <text x="296" y="668" class="gold">r̄ = (3,1)</text>
+  <line x1="85" y1="714" x2="161" y2="689" stroke="#087f75" stroke-width="5" marker-end="url(#math-teal)"/>
+  <text x="133" y="749" class="teal">単位方向 n</text>
+  <text x="544" y="561" class="eq">x₁ = (3,2,2,1)</text>
+  <text x="544" y="597" class="eq">x₂ = (1,1,4,1)</text>
+  <text x="544" y="642" class="eq gold">r̄ = (r₁+r₂)/2 = (0,0,3,1)</text>
+  <text x="544" y="686" class="eq teal">n = r̄ / ‖r̄‖ = (0,0,3,1)/√10</text>
+  <text x="544" y="724" class="k">残差コサイン = 9/√85 ≈ 0.976</text>
+  <text x="544" y="756" class="k">閾値 0.7 なら同じクラスタになる。</text>
+  <text x="44" y="782" class="k small">左図は残差の第3・第4成分を正確に表示。方向だけでまとめ、平均には元の残差の長さを残す。</text>
+
+  <rect x="24" y="820" width="1032" height="356" rx="16" fill="white" stroke="#c9d7e3"/>
+  <text x="44" y="861" class="h">3　Cを起点に、前方距離 t と半径方向距離 ρ で判定する</text>
+  <text x="44" y="898" class="eq">u = x−c　　t = u·n　　ρ = ‖u−tn‖　　光線：c+tn</text>
+  <rect x="107" y="1065" width="343" height="35" fill="#d8f1e9"/>
+  <path d="M107 1065 H450 M107 1065 V1100" fill="none" stroke="#087f75" stroke-width="2" stroke-dasharray="5 4"/>
+  <line x1="88" y1="1100" x2="466" y2="1100" stroke="#7b8b9c" stroke-width="2" marker-end="url(#math-grey)"/>
+  <line x1="88" y1="1100" x2="88" y2="931" stroke="#7b8b9c" stroke-width="2" marker-end="url(#math-grey)"/>
+  <text x="474" y="1107">t</text><text x="65" y="936">ρ</text><text x="68" y="1124" class="small">0</text>
+  <text x="95" y="1144" class="small">start = 0.25</text>
+  <text x="113" y="1053" class="small teal">radius = 0.5</text>
+  <circle cx="254" cy="942" r="7" fill="#b44748"/>
+  <text x="266" y="946" class="small">x₁：管の外</text>
+  <circle cx="396" cy="1078" r="7" fill="#087f75"/>
+  <text x="292" y="1130" class="small teal">x₂：ヒット</text>
+  <text x="544" y="946" class="eq">x₁：t = 7/√10 ≈ 2.214</text>
+  <text x="544" y="982" class="eq">　　ρ = √5.1 ≈ 2.258 → 除外</text>
+  <text x="544" y="1032" class="eq teal">x₂：t = 13/√10 ≈ 4.111</text>
+  <text x="544" y="1068" class="eq teal">　　ρ = 1/√10 ≈ 0.316 → 取得</text>
+  <text x="544" y="1111" class="k">2行ともクラスタ所属でも、ヒットは別判定。</text>
+  <text x="44" y="1157" class="k small">左図は各行の (t,ρ) の座標。幾何条件は t ≥ start かつ ρ ≤ radius。意味・関連性は判定しない。</text>
+</svg>
