@@ -68,6 +68,14 @@ class ResidualRayCliTest(unittest.TestCase):
     def test_default_residual_cluster_requires_c(self):
         self.assert_rejected(with_c=False, message="residual-cluster ray search requires --C")
 
+    def test_context_options_are_rejected_by_ray_mode(self):
+        for argument in (("--context", "source"), ("--context=source",)):
+            with self.subTest(argument=argument):
+                self.assert_rejected(
+                    *argument,
+                    message="--context, --ray-count, --serendipity and --law are only supported",
+                )
+
     def test_residual_cluster_rejects_legacy_only_flags_even_at_legacy_defaults(self):
         for arguments in (
             ("--no-center",), ("--vocab", "unused.json"), ("--vocab=",),

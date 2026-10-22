@@ -83,7 +83,7 @@ def read_corpus(path):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Rank third-concept candidates or explore corpus sets along a normal ray")
+    parser = argparse.ArgumentParser(description="Rank third-concept candidates or explore corpus sets along a normal ray", allow_abbrev=False)
     parser.add_argument("--A")
     parser.add_argument("--B")
     parser.add_argument("--C", help="source article text for residual-cluster ray search")

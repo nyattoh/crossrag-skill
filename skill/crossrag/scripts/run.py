@@ -35,7 +35,7 @@ def explicitly_supplied(argv, *options):
         for argument in argv
         if argument.startswith('--') and argument != '--'
     ]
-    return any(len(name) > 2 and option.startswith(name) for name in names for option in options)
+    return any(name == option for name in names for option in options)
 
 
 def _extract_pair_from_text(text):
@@ -140,7 +140,7 @@ def load_conversation_corpus(path):
 def main():
     # Windows consoles default to a legacy code page; the JSON contract is UTF-8.
     sys.stdout.reconfigure(encoding='utf-8')
-    p = argparse.ArgumentParser(description='CrossRAG single-metric geometric retrieval')
+    p = argparse.ArgumentParser(description='CrossRAG single-metric geometric retrieval', allow_abbrev=False)
     p.add_argument('--context', help='Two or more concepts separated by commas')
     p.add_argument('--mode', choices=['similar', 'orthogonal', 'wedge'], default=None, help='Single ranking metric mode')
     p.add_argument('--method', choices=['similar', 'orthogonal', 'wedge'], default=None, help='Alias for --mode')

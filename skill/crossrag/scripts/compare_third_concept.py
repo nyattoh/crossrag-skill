@@ -764,7 +764,7 @@ def positive_null_samples(value):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Compare CrossRAG retrieval methods")
+    parser = argparse.ArgumentParser(description="Compare CrossRAG retrieval methods", allow_abbrev=False)
     parser.add_argument("--A")
     parser.add_argument("--B")
     parser.add_argument("--A-sentence")

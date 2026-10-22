@@ -294,17 +294,30 @@ class LlmPoolCliTest(unittest.TestCase):
         sheet = (sheet_dir / "blind_sheet.md").read_text(encoding="utf-8")
         self.assertIn("Corpus source: `demo`", sheet)
 
-    def test_llm_pool_respects_abbreviated_seed_option(self):
+    def test_llm_pool_rejects_abbreviated_seed_option(self):
         for script, arguments in (
             ("run.py", ()),
             ("third_concept_cli.py", ()),
             ("compare_third_concept.py", ()),
         ):
             with self.subTest(script=script):
-                result = self.success_json(
+                completed = self.run_cli(
                     script, *arguments, "--llm-pool", str(self.pool_path), "--see", "12",
                 )
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn("unrecognized arguments", completed.stderr.decode("utf-8", errors="replace"))
+
+    def test_llm_pool_accepts_complete_options_with_equals_values(self):
+        for script in ("run.py", "third_concept_cli.py", "compare_third_concept.py"):
+            with self.subTest(script=script):
+                result = self.success_json(
+                    script,
+                    f"--llm-pool={self.pool_path}",
+                    "--limit=4",
+                    "--seed=12",
+                )
                 self.assertEqual(result["seed"], 12)
+                self.assertEqual(len(result["selected"]), 4)
 
     def test_llm_pool_guards_abbreviated_geometric_options(self):
         commands = (
@@ -316,19 +329,23 @@ class LlmPoolCliTest(unittest.TestCase):
             with self.subTest(script=script):
                 completed = self.run_cli(script, "--llm-pool", str(self.pool_path), *options)
                 self.assertEqual(completed.returncode, 2)
-                self.assertIn("cannot be combined", completed.stderr.decode("utf-8", errors="replace"))
+                self.assertIn("unrecognized arguments", completed.stderr.decode("utf-8", errors="replace"))
 
-    def test_geometry_clis_keep_existing_option_abbreviations(self):
+    def test_geometry_clis_reject_option_abbreviations(self):
         corpus = ROOT / "tests" / "fixtures" / "synthetic_corpus.json"
         commands = (
-            ("run.py", ("--context", "rain,clock", "--corpus", str(corpus), "--enc", "hash", "--lim", "1")),
+            ("run.py", ("--cont", "rain,clock", "--corpus", str(corpus), "--enc", "hash", "--lim", "1")),
             ("third_concept_cli.py", ("--A", "rain", "--B", "clock", "--corpus", str(corpus), "--enc", "hash", "--lim", "1")),
-            ("compare_third_concept.py", ("--A", "rain", "--B", "clock", "--corpus", str(corpus), "--enc", "hash", "--limit", "1", "--null-samples", "2")),
+            ("compare_third_concept.py", ("--A", "rain", "--B", "clock", "--corpus", str(corpus), "--enc", "hash", "--lim", "1", "--null-samples", "2")),
         )
         for script, options in commands:
             with self.subTest(script=script):
                 completed = self.run_cli(script, *options)
-                self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
+                self.assertEqual(completed.returncode, 2)
+                self.assertTrue(
+                    "unrecognized arguments" in completed.stderr.decode("utf-8", errors="replace")
+                    or "ambiguous option" in completed.stderr.decode("utf-8", errors="replace")
+                )
 
     def test_minimum_pool_and_matching_limit_boundaries_are_valid(self):
         minimum = [f"concept-{index}" for index in range(10)]
