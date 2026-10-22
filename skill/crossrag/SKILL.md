@@ -1,6 +1,6 @@
 ---
 name: crossrag
-description: Explore concept-corpus motifs for creative writing, metaphors, or cross-domain ideation. Use when a user wants to compare similarity, orthogonal-residual, oriented wedge, random retrieval, normal-ray geometry, or random-orthogonal serendipity. Normal-ray and random-orthogonal report corpus items near geometric directions without semantic relevance filtering; other retrieved motifs and scores are heuristic, not facts or proof.
+description: Explore conversation or concept-corpus utterances using single-metric geometric retrieval (similarity, orthogonal-residual, oriented wedge), normal-ray geometry, or random-orthogonal serendipity. Reports raw mathematical calculation results without unrequested interpretation; bundled demo corpus is never used implicitly.
 license: MIT
 compatibility: Requires Python 3.10+ and NumPy for local retrieval. Semantic mode additionally needs sentence-transformers and a locally available model.
 ---
@@ -9,32 +9,53 @@ compatibility: Requires Python 3.10+ and NumPy for local retrieval. Semantic mod
 
 ## Purpose and limits
 
-Use CrossRAG when the user wants a fresh starting point for fiction, poetry, metaphor, copy, or cross-domain ideas. It searches an existing concept corpus from several numerical viewpoints and passes selected motifs to the host model as inspiration. Local Python performs retrieval; the host model writes the final text.
+CrossRAG performs deterministic mathematical retrieval over conversation utterances or an explicitly supplied corpus from single geometric viewpoints (`similar`, `orthogonal`, `wedge`), `normal-ray`, or `random-orthogonal`.
 
-This is an experimental ideation aid. It does not fact-check, establish causality, prove that a connection is useful, or show improved creativity or retrieval quality. A retrieved motif or rank is not evidence. The default character n-gram hash is lexical and offline; it is not a semantic embedding. Never say a search ran if the script did not run.
+- **Source data is conversation data (or an explicit user corpus) only**: The bundled 22-item demo corpus (`DEFAULT_CORPUS` / `references/example-corpus.json`) is strictly for explicit `--demo-corpus` smoke testing and must **never** be used implicitly.
+- **Single-metric mathematical ranking**: In `engine.py` / `run.py`, each mode ranks strictly by one metric (`similar` = `cosine`, `orthogonal` = `orthogonal_residual`, `wedge` = `gram_bivector_cos`). No composite score, cosine-band target, novelty weight, or coherence weight is used.
+- **Encoder disclosure**: Always display the `encoder` field from the output. The default `hash` encoder (`hash-ngram（文字特徴・意味理解ではない）`) is a character n-gram hash representation and **is not a semantic embedding**.
+- Never say a search ran if the script did not run.
+
+## Reporting policy (Strict Raw Output Default)
+
+When the user asks to run CrossRAG (e.g. "CrossRAGして"):
+
+1. **Default output is raw mathematical results only**: Output the structured JSON or a plain table containing:
+   - `context` (input context concepts)
+   - `corpus_source` (`conversation`, `explicit`, or `demo`)
+   - `encoder` (explicitly noting `hash-ngram（文字特徴・意味理解ではない）` is not a semantic embedding when `hash` is used)
+   - `mode` and `ranking_metric` (`cosine`, `orthogonal_residual`, or `gram_bivector_cos`)
+   - `selected` rows (`index`, `a`, `b`, `line`, `rank_value`, `ranking_metric`, `cosine`, `orthogonal`, `wedge`)
+   - `warnings` and `note`
+2. **No unrequested interpretation**: Unless the user explicitly asks for interpretation, prose generation, metaphorical explanation, or hypothesis writing, **do NOT add any interpretation, psychological reading, metaphorical commentary, or creative prose**.
 
 ## First run
 
-If Python and NumPy are ready, run this from the skill directory:
+Run from the skill directory with a conversation log or explicit corpus:
 
 ```bash
-python scripts/run.py --context '犬、カレー、夕暮れ' --method similar
+python scripts/run.py --context '犬、カレー、夕暮れ' --conversation path/to/conversation.json --mode orthogonal
 ```
 
-This uses the bundled 22-item example corpus and offline `hash` encoder as a simple similarity baseline. Read the JSON `selected` entries as candidate motifs, not finished prose. Choose one to three motifs, preserve a coherent scene or argument, and write original text without copying retrieved lines. The example corpus is only a demonstration; use a suitable user corpus for real work.
+For an explicit smoke test using the demo corpus, you must pass `--demo-corpus`:
 
-For exploration or research ideas, run `--mode discovery`. Present connections as hypotheses with uncertainty and a small test; do not present them as discoveries. If the user only wants ideas, avoid making them learn every scoring option before returning a useful first result.
+```bash
+python scripts/run.py --context '犬、カレー、夕暮れ' --mode similar --demo-corpus
+```
+
+Omitting `--conversation`, `--corpus`, and `--demo-corpus` raises a CLI error (`exit code 2`).
 
 ## Execution
 
-1. Determine **creative** (fiction, metaphor, evocative copy) or **discovery** (brainstorming, research connections) from the request. When ambiguous, default to creative for writing and discovery for ideas.
-2. Extract **at least two context concepts** from the request, retaining their exact order for wedge mode. Do not fabricate user facts.
-3. Use the bundled `scripts/run.py` from this skill directory. If `numpy` is missing, tell the user that `requirements.txt` installs it; do not install dependencies without authorisation. Default `hash` needs no model download, runs offline, and **is not a semantic embedding**. Use `--encoder semantic` only when `sentence-transformers` and the chosen model are already available or the user authorises setup; never download silently or cause paid API calls.
-4. Run `--method wedge` and `--method similar` as a baseline on **the same corpus**. Consider `orthogonal` if alternative directions are wanted. The experimental mode comparison is meaningful only with a common encoder, corpus, and generation conditions.
-   Inspect the returned `warnings`. With the default hash encoder, short Japanese terms can make the wedge component zero for every candidate; then wedge contributes nothing to the ranking. Report that warning plainly. Do not claim the selected motifs came from wedge geometry when the component is degenerate.
-5. Use the retrieved entries as *inspiration*, not evidence or sentences to reproduce. Record source terms and numerical scores separately from your own interpretive claims.
-6. For creative work: retain recognisable scene logic, introduce ideally one surprising relational shift, and make a finished piece of prose. For discovery: state 3 hypotheses, bridges to the source concepts, what may falsify each, and one minimal test. Do not label speculative analogies as discoveries.
-7. When reporting research comparisons, be clear that ranks are heuristic and do not establish superiority over vanilla RAG. When retrieval scripts cannot run, say so, and label any language-only mock-up explicitly; never claim mathematical retrieval occurred.
+1. Extract **at least two context concepts** from the user's request or conversation, retaining their exact order for `wedge` mode. Do not fabricate user facts.
+2. Prepare the candidate pool from **conversation data** (`--conversation <path>`) or an **explicit user corpus** (`--corpus <path>`). Only use `--demo-corpus` if the user explicitly asks for a demo/smoke test.
+3. Run `scripts/run.py` from this skill directory. If `numpy` is missing, tell the user that `requirements.txt` installs it; do not install dependencies without authorisation. Default `hash` needs no model download, runs offline, and **is not a semantic embedding**. Use `--encoder semantic` only when `sentence-transformers` and the chosen model are already available or the user authorises setup; never download silently or cause paid API calls.
+4. Select `--mode` (`similar`, `orthogonal`, or `wedge`). Each mode orders strictly by its single metric (`rank_value`):
+   - `similar` → `cosine`
+   - `orthogonal` → `orthogonal_residual`
+   - `wedge` → `gram_bivector_cos`
+   Inspect the returned `warnings`. With the default hash encoder, short Japanese terms can make the wedge component zero for every candidate; report that warning plainly.
+5. **Follow the Reporting policy**: Return only the raw JSON / metric table (`context`, `corpus_source`, `encoder`, `ranking_metric`, `selected` rows with `rank_value` and raw metrics, `warnings`). Only perform downstream writing or hypothesis framing if the user explicitly requests it.
 
 ## Host compatibility
 
@@ -45,19 +66,19 @@ Use each host's own check and invocation when needed: Codex `/skills` then `$cro
 ## CLI
 
 ```bash
-python scripts/run.py --context '犬、カレー、夕暮れ、帰宅' --mode creative --method wedge --limit 5
-python scripts/run.py --context '記憶、法線、検索' --mode discovery --method orthogonal --limit 5
-python scripts/run.py --context '犬、カレー' --mode creative --method similar --encoder hash
-python scripts/run.py --context '犬、カレー' --corpus references/example-corpus.json
+python scripts/run.py --context '記憶、法線、検索' --conversation path/to/conversation.json --mode orthogonal --limit 5
+python scripts/run.py --context '犬、カレー、夕暮れ、帰宅' --corpus path/to/corpus.json --mode wedge --limit 5
+python scripts/run.py --context '犬、カレー' --mode similar --encoder hash --demo-corpus
+python scripts/run.py --context '犬、カレー' --corpus references/example-corpus.json --mode orthogonal
 ```
 
-The script prints structured UTF-8 JSON with retrieved motifs, `cosine`, `orthogonal`, `wedge` and ranked scores. The LLM then generates the final artefact. Use `--corpus` to point to a user-supplied JSON collection of triples `["concept1", "concept2", "inspiration"]` or objects with `a`, `b`, `line`.
+The script prints structured UTF-8 JSON with `context`, `mode`, `ranking_metric`, `corpus_source` (`conversation`, `explicit`, or `demo`), `encoder`, `selected` (each item containing `index`, `a`, `b`, `line`, `rank_value`, `ranking_metric`, `cosine`, `orthogonal`, `wedge`), `total`, `warnings`, and `note`.
 
-Read `references/methodology.md` for formulae, limitations, and evaluation guidance. Read `references/modes.md` for output patterns.
+Read `references/methodology.md` for formulae, limitations, and evaluation guidance. Read `references/modes.md` for mode details.
 
 ## third-concept (experimental)
 
-Use `python scripts/third_concept_cli.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --encoder hash --limit 5 --seed 0` to rank a supplied candidate pool. Use `--emit-prompt` (optionally `--with-math`) to prepare an external hypothesis prompt, then import the resulting file with `--hypotheses path/to/hypotheses.json`. Compare `similar`, `orthogonal`, `wedge`, `random`, `third-concept`, `mean`, and `third-concept-no-wedge` with `python scripts/compare_third_concept.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --format markdown`. Preserve every output candidate's `origin` label (`retrieved`, `math`, `llm_hypothesis`, or `idea`); all outputs remain unverified and must not be presented as facts, proofs, or discoveries.
+Use `python scripts/third_concept_cli.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --encoder hash --limit 5 --seed 0` to rank a supplied candidate pool. Use `--emit-prompt` (optionally `--with-math`) to prepare an external hypothesis prompt, then import the resulting file with `--hypotheses path/to/hypotheses.json`. Compare `similar`, `orthogonal`, `wedge`, `third-concept`, `mean`, and `third-concept-no-wedge` with `python scripts/compare_third_concept.py --A 'concept A' --B 'concept B' --corpus path/to/corpus.json --format markdown`. Preserve every output candidate's `origin` label (`retrieved`, `math`, `llm_hypothesis`, or `idea`); all outputs remain unverified and must not be presented as facts, proofs, or discoveries.
 
 `third_concept_cli.py` requires `--limit` to be at least 1. The three third-concept ranking variants exclude corpus entries that match or contain either input, or have raw cosine similarity of at least 0.98 to an input; comparison baselines remain the unfiltered `engine.run()` results and expose `contains_input` on each selected entry.
 

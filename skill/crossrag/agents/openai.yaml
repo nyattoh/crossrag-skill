@@ -1,4 +1,4 @@
 interface:
   display_name: "CrossRAG"
-  short_description: "発想の候補を検索し、文章や仮説の材料にする"
-  default_prompt: "CrossRAGで「〇〇」と「〇〇」から発想の候補を検索し、着想として使った短い文章案を作って。候補を事実の根拠として扱わないで。"
+  short_description: "会話データを単一数学指標で幾何検索し、生の計算結果を返す"
+  default_prompt: "CrossRAGで会話データから「〇〇」と「〇〇」をコンテキストに指定し、単一指標の数値計算結果（JSONまたは表）のみを解釈なしで出力して。"

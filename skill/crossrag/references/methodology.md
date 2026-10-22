@@ -1,15 +1,24 @@
 # Geometry and methodological boundaries
 
-The baseline `engine.py` is copied from CrossRAG Lab v0.1. For each corpus item, its candidate full sentence is embedded; its concept pair is embedded separately.
+The baseline `engine.py` evaluates candidate utterances/items from a user-supplied conversation or corpus. For each item, its full formatted text (`aとb。line`) is embedded, and its concept pair `(a, b)` is embedded separately.
 
-- **similar**: cosine between averaged context anchors and candidate text.
-- **orthogonal**: projection residual from the span of context anchors, blended with cosine-band and coherence weights.
-- **wedge**: cosine of oriented bivectors `a∧b` and `u∧v` computed without materialising d-by-d arrays: `((a·u)(b·v)-(a·v)(b·u)) / (||a∧b|| ||u∧v||)` for unit vectors. The *first two* context terms determine orientation. Swapping term order flips the sign; this does NOT entail a natural linguistic direction.
-- **random**: deterministic hash-based ranking used as a control.
+Each retrieval mode in `engine.py` / `run.py` ranks candidates strictly by a **single mathematical metric** (`rank_value`), with **no composite score, cosine-band target, novelty weight, or coherence weight**:
 
-These ranking formulae are **heuristics** with no established relation to story quality. HashEncoder is a reproducible character n-gram representation, not a semantic model. For actual semantic tests use a compatible embedding model (e.g. multilingual E5) and observe its query/passage conventions: the copied v0.1 prototype encodes strings symmetrically without such prefixes, so production-quality retrieval is not established. The normal-ray residual-cluster mode intentionally uses only the passage path (`encode_passage`) for A, B, C and all candidates. Model downloads are optional.
+- **similar** (`ranking_metric: "cosine"`): cosine similarity between the normalised average of context anchors and the candidate text vector (`cosine(ctx, vec)`).
+- **orthogonal** (`ranking_metric: "orthogonal_residual"`): Euclidean norm of the projection residual from the linear subspace spanned by the context anchors (`||v - P_span(anchors)(v)||`). No band, novelty, or coherence weights are mixed in.
+- **wedge** (`ranking_metric: "gram_bivector_cos"`): oriented bivector cosine between `a∧b` (first two context terms) and `u∧v` (candidate concept pair), computed via the Gram determinant `((a·u)(b·v)-(a·v)(b·u)) / (||a∧b|| ||u∧v||)` without materialising `d×d` matrices. The *first two* context terms determine orientation. Swapping term order flips the sign; this does NOT entail a natural linguistic direction.
 
-A wedge compares oriented planes; it does not itself decode text or discover a hidden concept. The LLM consumes the retrieved corpus motifs and writes the final text. Factual questions require separate evidence sources; use this tool to propose ideas, not certify them.
+Each returned row exposes `rank_value` (equal to the mode's single metric), `ranking_metric`, and the three raw geometric quantities `cosine`, `orthogonal`, and `wedge`. The legacy blended `score` field and `random` mode are removed from `engine.py` and `run.py`.
+
+## Corpus source and encoder transparency
+
+- **No implicit demo corpus**: `engine.run()` raises `ValueError` when `corpus=None` unless `use_demo_corpus=True` is explicitly passed. `run.py` requires `--conversation <path>`, `--corpus <path>`, or explicit `--demo-corpus`. The bundled 22-item `DEFAULT_CORPUS` and `references/example-corpus.json` are strictly for explicit demonstration/smoke tests and must never be used implicitly.
+- **Conversation-derived candidates**: Normal operation takes conversation data (`--conversation` or user conversation utterances) and records `corpus_source` (`"conversation"`, `"explicit"`, or `"demo"`).
+- **Encoder disclosure**: Output always records `encoder`. `HashEncoder` (`hash-ngram（文字特徴・意味理解ではない）`) is a reproducible character n-gram hash representation, **not** a semantic embedding model. For semantic embeddings, use `--encoder semantic` with a local `SentenceTransformer` model (e.g. `intfloat/multilingual-e5-small`).
+
+A wedge or residual computation is pure vector geometry; it does not decode text, discover hidden concepts, or prove factual claims. By default, report only the raw mathematical calculation results without adding unrequested interpretation.
+
+## Experimental normal-ray mode
 
 The experimental `normal-ray` mode defaults to `--ray-method residual-cluster` and requires concepts A, B, an explicit source article C, and a corpus. A, B, C and every corpus candidate must be embedded in one shared coordinate space: all are encoded with the single `encoder.encode_passage` path, using A, B and C as input text and each candidate as its formatted corpus-row text (for example, `aとb。line` for pair rows). With role-prefixed encoders, any known leading `query: ` or `passage: ` marker is removed before encoding, then the encoder applies the same passage prefix to every vector; prefix-free encoders add no role prefix. Original corpus text is retained in hit provenance. `encode_query` is never used in this mode. Use one encoder, one encoding path, and one prefix policy for all vectors. Let `a`, `b`, and `c` be their resulting raw coordinates. The affine source plane is `S = c + span(a-c, b-c)`; its ray origin is `c`. With `V = span(a-c, b-c)`, each corpus passage vector `x` has residual `r(x) = (x-c) - P_V(x-c)`, orthogonal to `V`. Coordinates are not centred; the residual is translation invariant. Residuals with norm at most `min_residual_norm` (default `1e-9`) are treated as in-plane: their axial distance is set exactly to `0.0`, their radial distance is therefore `||x-c||`, and they are unusable for clustering but remain eligible for retrieval geometry. This threshold defines in-plane membership, so even `0 < ||r|| <= min_residual_norm` counts as in-plane; a start distance below that scale (for example, `1e-10`) can differ from the exact mathematical `t`. For example, exact duplicate embeddings of A, B or C are reported with `--ray-start-distance 0` when their radial distance is at most `--ray-radius`, and never with the default start distance `0.25`.
 
@@ -23,4 +32,4 @@ The output contains `mode: "normal-ray"`, `method: "affine_residual_cluster"`, `
 
 Legacy method: `--ray-method pca-cross` retains the former centred PCA frame and A×B cross-product ray, including its old exclusion behaviour. Use it to reproduce earlier calls without C. The PCA method and its thresholds have not been evaluated for usefulness.
 
-Source project: local CrossRAG Lab v0.1. See its original README for additional method notes. Background: https://arxiv.org/abs/1603.09320 and https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html
+Source project: local CrossRAG Lab v0.1. Background: https://arxiv.org/abs/1603.09320 and https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html

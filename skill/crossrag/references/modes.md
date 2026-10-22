@@ -1,19 +1,23 @@
 # CrossRAG modes
 
-## Creative
-- Input: 2+ concepts plus optional genre, length, tone.
-- Retrieve with wedge and similar baseline using identical input.
-- Output: complete original story/poem/copy, followed (when useful) by a short note explaining which unexpected concept bridge was chosen; no raw scores unless requested.
-- Avoid a sequence of unconnected bizarre details. Prefer a plausible scene and one unconventional transformation.
+## Default reporting policy (Raw mathematical results only)
+- Input: 2+ context concepts plus conversation data (`--conversation`) or an explicit corpus (`--corpus`).
+- Retrieve using one of the three single-metric modes (`similar`, `orthogonal`, `wedge`).
+- Default output: structured JSON or plain table showing `context`, `corpus_source`, `encoder`, `mode`, `ranking_metric`, `selected` rows (`index`, `a`, `b`, `line`, `rank_value`, `ranking_metric`, `cosine`, `orthogonal`, `wedge`), `warnings`, and `note`.
+- Do NOT add interpretation, psychological reading, metaphorical commentary, or creative writing unless the user explicitly asks for it.
 
-## Discovery
-- Input: two or more domains, problem statement, optional constraints.
-- Retrieve and identify at least three possible conceptual bridges.
-- Output for each idea: proposition, why it may work, what evidence is missing, falsifying or discriminating test. Clearly mark speculative ideas.
-- Do not treat top-ranked embedding similarities or wedge orientation as evidence of real-world causality.
+## Single-metric retrieval modes (`run.py` / `engine.py`)
+- **similar** (`ranking_metric: "cosine"`): ranks strictly by cosine similarity to the averaged context anchor vector.
+- **orthogonal** (`ranking_metric: "orthogonal_residual"`): ranks strictly by projection residual norm from the span of context anchors.
+- **wedge** (`ranking_metric: "gram_bivector_cos"`): ranks strictly by oriented bivector cosine between the first two context terms and the candidate pair.
 
-## Shared evaluation
-For legacy creative and discovery comparisons, maintain equal corpus, encoder, prompt, model and sampling controls across retrieval methods. Blind-rate coherence, surprise, specificity and usefulness separately, and include a no-retrieval baseline when possible. This guidance does not apply to `random-orthogonal`: acceptance for that mode is based on tests of mathematical behaviour. `--serendipity` (デタラメ度) expresses creative intent and tone; it is not a quality or retrieval metric.
+No composite `score`, cosine-band target, novelty weight, or coherence weight is used. The legacy `random` mode is removed.
+
+## Optional downstream tasks (only when explicitly requested)
+When the user explicitly asks for creative writing or hypothesis generation on top of the retrieved results:
+- Keep raw retrieval numbers and corpus provenance separate from host-generated prose or hypotheses.
+- Do not treat embedding similarities, residuals, or wedge orientation as factual evidence or proof of causality.
+- For method comparisons, maintain equal corpus, encoder, prompt, model, and sampling controls across retrieval modes.
 
 ## Random-orthogonal (experimental)
 

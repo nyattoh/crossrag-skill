@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1580" viewBox="0 0 1200 1580" role="img" aria-labelledby="title desc" xml:lang="ja">
 <title id="title">CrossRAG: 残差クラスター法線レイパイプライン（normal-ray / affine_residual_cluster）</title>
-<desc id="desc">概念 A・B、ソース C、および供給コーパスの各行はすべて同一の encoder.encode_passage 経路でベクトル化される。アフィン平面 S は c から span(a-c, b-c) 上に定義され、各候補 x の生残差は r=(x-c)-P_V(x-c)。利用可能なコーパス残差から決定論的シード・コサイン方向クラスターが形成され、条件を満たすクラスターの生残差平均を正規化して C 原点のレイ方向とする。実コーパス全体に対し inclusive な軸距離 t が start_distance 以上かつ半径距離が radius 以下の行が幾何ヒットとして出力される。クラスター所属は in_cluster フラグのみで、メンバーが自動的にヒットとは限らない。意味・関連性フィルタや生成は行わない。run.py の既定は wedge だが normal-ray モードの既定は residual-cluster。similar / orthogonal / wedge / random および pca-cross は副次的。高次元の模式図であり、3 次元交差積や一意の法線を示唆しない。既定エンコーダはオフライン文字 n-gram ハッシュで、意味埋め込みではない。</desc>
+<desc id="desc">概念 A・B、ソース C、および供給コーパスの各行はすべて同一の encoder.encode_passage 経路でベクトル化される。アフィン平面 S は c から span(a-c, b-c) 上に定義され、各候補 x の生残差は r=(x-c)-P_V(x-c)。利用可能なコーパス残差から決定論的シード・コサイン方向クラスターが形成され、条件を満たすクラスターの生残差平均を正規化して C 原点のレイ方向とする。実コーパス全体に対し inclusive な軸距離 t が start_distance 以上かつ半径距離が radius 以下の行が幾何ヒットとして出力される。クラスター所属は in_cluster フラグのみで、メンバーが自動的にヒットとは限らない。意味・関連性フィルタや生成は行わない。run.py は単一指標（similar / orthogonal / wedge、既定は orthogonal）で動作するが normal-ray モードの既定は residual-cluster。similar / orthogonal / wedge および pca-cross は副次的。高次元の模式図であり、3 次元交差積や一意の法線を示唆しない。既定エンコーダはオフライン文字 n-gram ハッシュで、意味埋め込みではない。</desc>
 <defs>
   <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
     <path d="M0 0L10 5L0 10Z" fill="#1a4a8a"/>
@@ -121,18 +121,18 @@
 <path d="M588 1224 H612" fill="none" stroke="#96a8b8" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-blue)"/>
 <rect x="612" y="1150" width="540" height="148" rx="14" fill="#0f2438"/>
 <text x="636" y="1180" font-size="13" fill="#7ec8d4" font-weight="700">08 / 任意・下流（別系統）</text>
-<text x="636" y="1214" font-size="21" fill="#ffffff" font-weight="700">ホスト LLM による解釈・執筆</text>
-<text x="636" y="1248" font-size="16" fill="#d8e8ef">本パイプラインは JSON を返すのみ。創作・仮説提示は受け手側。</text>
-<text x="636" y="1276" font-size="14" fill="#a8c4d0">run.py（wedge 等）の CLI・出力スキーマとは別。</text>
+<text x="636" y="1214" font-size="21" fill="#ffffff" font-weight="700">明示依頼時のみ解釈・執筆</text>
+<text x="636" y="1248" font-size="16" fill="#d8e8ef">本パイプラインは生のJSON計算結果のみを返す。勝手な解釈は加えない。</text>
+<text x="636" y="1276" font-size="14" fill="#a8c4d0">run.py（単一指標）の CLI・出力スキーマとは別。</text>
 
 <!-- Footer disclaimers -->
 <rect x="48" y="1320" width="1104" height="228" rx="12" fill="#faf3e8" stroke="#d4b896" stroke-width="1.5"/>
 <text x="72" y="1350" font-size="13" fill="#8a5a12" font-weight="700">副次経路（主フローに混ぜない）</text>
-<text x="72" y="1378" font-size="15" fill="#3d5166">run.py 全体既定: method=wedge（similar / orthogonal / wedge / random）。</text>
+<text x="72" y="1378" font-size="15" fill="#3d5166">run.py 単一指標モード: similar / orthogonal / wedge（既定: orthogonal）。</text>
 <text x="72" y="1402" font-size="15" fill="#3d5166">third_concept_cli の --ray-method pca-cross はレガシー。</text>
 <text x="72" y="1426" font-size="15" fill="#3d5166">（C 不要・ centred PCA / A×B 法線）</text>
 <text x="72" y="1450" font-size="14" fill="#5a6a78">normal-ray 既定のみ --ray-method residual-cluster（--C 必須）。</text>
-<text x="72" y="1474" font-size="14" fill="#5a6a78">幾何は模式図。ヒューリスティック ≠ 創造性・発見の実証。モチーフは事実証拠ではない。</text>
+<text x="72" y="1474" font-size="14" fill="#5a6a78">幾何は模式図。数値指標 ≠ 創造性・発見の実証。候補は事実証拠ではない。</text>
 
 <text x="72" y="1508" font-size="12" fill="#5a6a78">HashEncoder = 再現可能な文字 n-gram 表現（意味モデルではない）</text>
 <text x="72" y="1530" font-size="12" fill="#5a6a78">参照: skill/crossrag/scripts/residual_ray.py</text>
@@ -200,7 +200,7 @@
 <text x="52" y="1458" font-size="36" fill="#ffffff" font-weight="700">ホスト LLM（本管は JSON のみ）</text>
 
 <rect x="32" y="1478" width="1136" height="88" rx="10" fill="#faf3e8" stroke="#d4b896" stroke-width="1.5"/>
-<text x="52" y="1518" font-size="28" fill="#8a5a12" font-weight="700">副次: run.py wedge 既定 · pca-cross レガシー</text>
+<text x="52" y="1518" font-size="28" fill="#8a5a12" font-weight="700">副次: run.py 単一指標 · pca-cross レガシー</text>
 <text x="52" y="1554" font-size="26" fill="#5a6a78">normal-ray 既定 = residual-cluster（--C 必須）</text>
 
 </g>

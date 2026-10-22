@@ -1,4 +1,4 @@
-"""Contract tests for the seven-way third-concept comparison."""
+"""Contract tests for the third-concept comparison."""
 from __future__ import annotations
 
 import json
@@ -80,7 +80,7 @@ class CompareThirdConceptTest(unittest.TestCase):
         result = self.compare(limit=4)
         self.assertEqual(
             tuple(result["methods"]),
-            ("similar", "orthogonal", "wedge", "random", "third-concept", "mean", "third-concept-no-wedge"),
+            ("similar", "orthogonal", "wedge", "third-concept", "mean", "third-concept-no-wedge"),
         )
         self.assertEqual(tuple(result["methods"]), METHOD_NAMES)
         for method in result["methods"].values():
@@ -92,7 +92,7 @@ class CompareThirdConceptTest(unittest.TestCase):
         for name, method in result["methods"].items():
             for selected in method["selected"]:
                 expected = {"corpus_index", "a", "b", "metrics"}
-                if name in ("similar", "orthogonal", "wedge", "random"):
+                if name in ("similar", "orthogonal", "wedge"):
                     expected.add("contains_input")
                 self.assertEqual(set(selected), expected)
 
@@ -121,7 +121,7 @@ class CompareThirdConceptTest(unittest.TestCase):
             corpus_path=self.corpus_path,
         )
         context = "H2O_MEMORY、TRAJEXA"
-        for name in ("similar", "orthogonal", "wedge", "random"):
+        for name in ("similar", "orthogonal", "wedge"):
             expected = run(context, self.corpus, name, limit=5, encoder=encoder)
             self.assertEqual(
                 [item["corpus_index"] for item in result["methods"][name]["selected"]],
@@ -140,7 +140,7 @@ class CompareThirdConceptTest(unittest.TestCase):
         )
         self.assertEqual(result["input"], {"A": "H2O/MEMORY", "B": "TRA JEXA"})
         encoder = make_encoder("hash")
-        for name in ("similar", "orthogonal", "wedge", "random"):
+        for name in ("similar", "orthogonal", "wedge"):
             expected = run("H2O_MEMORY、TRA_JEXA", self.corpus, name, limit=3, encoder=encoder)
             self.assertEqual(
                 [item["corpus_index"] for item in result["methods"][name]["selected"]],
@@ -152,10 +152,10 @@ class CompareThirdConceptTest(unittest.TestCase):
         for name in ("third-concept", "mean", "third-concept-no-wedge"):
             self.assertNotIn(0, {item["corpus_index"] for item in result["methods"][name]["selected"]})
             self.assertNotIn(1, {item["corpus_index"] for item in result["methods"][name]["selected"]})
-        baseline_items = [item for name in ("similar", "orthogonal", "wedge", "random") for item in result["methods"][name]["selected"]]
+        baseline_items = [item for name in ("similar", "orthogonal", "wedge") for item in result["methods"][name]["selected"]]
         self.assertTrue(any(item["contains_input"] for item in baseline_items))
         self.assertTrue(any("not exclusion-filtered" in note for note in result["notes"]))
-        self.assertTrue(any("seed" in note and "engine" in note and "random" in note for note in result["notes"]))
+        self.assertTrue(any("seed" in note for note in result["notes"]))
 
     def test_dict_rows_use_the_validated_corpus_path(self):
         dict_rows = [{"a": a, "b": b, "line": line} for a, b, line in self.corpus]
@@ -556,7 +556,7 @@ class ComparisonV3Test(unittest.TestCase):
     def test_plain_text_corpora_work_in_api_and_cli(self):
         plain = ["PLAIN-LINE-01", {"line": "PLAIN-LINE-02"}, "PLAIN-LINE-03"]
         result = compare_methods("steam", "sleep", plain, make_encoder("hash"), limit=2, null_samples=8)
-        self.assertEqual(tuple(result["methods"]), ("similar", "random", "third-concept", "mean", "third-concept-no-wedge"))
+        self.assertEqual(tuple(result["methods"]), ("similar", "third-concept", "mean", "third-concept-no-wedge"))
         self.assertEqual(result["evaluation"]["baseline_source"], "shared-space")
         self.assertNotIn("orthogonal", result["methods"])
         self.assertTrue(any("orthogonal" in note and "wedge" in note for note in result["evaluation"]["notes"]))
@@ -595,7 +595,7 @@ class ComparisonV3Test(unittest.TestCase):
             self.assertTrue(all("発酵" not in self.corpus[item["corpus_index"]][2] for item in result["methods"][name]["selected"]))
         ratio = result["evaluation"]["methods"]["third-concept-ratio"]["selected"]
         self.assertTrue(all("発酵" not in self.corpus[item["corpus_index"]][2] for item in ratio))
-        baseline_items = [item for name in METHOD_NAMES[:4] for item in result["methods"][name]["selected"]]
+        baseline_items = [item for name in ("similar", "orthogonal", "wedge") for item in result["methods"][name]["selected"]]
         self.assertTrue(any("発酵" in self.corpus[item["corpus_index"]][2] and item["contains_input"] for item in baseline_items))
 
     def test_compare_pair_shares_mu_pool_and_records_conditions(self):
