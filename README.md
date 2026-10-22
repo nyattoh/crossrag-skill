@@ -1,6 +1,10 @@
 # CrossRAG
 
-CrossRAGは、概念A・Bと出典記事Cを入力し、既存コーパスの残差方向をクラスタ化して、Cから延びる光線（normal ray）の近傍にある行を返す実験的な検索スキルです。このresidual-cluster方式はローカルのPythonで数値計算を行い、コーパス内の原文、出典を追跡するID、幾何距離をUTF-8のJSONで返します。
+CrossRAGは、会話データや明示コーパスを単一の数学的指標（`similar` / `orthogonal` / `wedge`）または法線光線（`normal-ray` / `random-orthogonal`）で探索し、生の数値計算結果をUTF-8のJSONで返すスキルです。
+
+- **元データは会話データ（または明示コーパス）のみ**: 同梱の22件コーパス（`DEFAULT_CORPUS`）や`references/example-corpus.json`は、`--demo-corpus`等による明示的な動作確認専用であり、通常経路で暗黙に使用されることはありません。
+- **単一指標のみによる順位付け**: `engine.py` / `run.py`では各モードが単一指標（`similar=cosine`、`orthogonal=orthogonal_residual`、`wedge=gram_bivector_cos`）のみで順位を決定します。複合スコア（`score`）や`band`・`novelty`・`coherence`の重み付けは使用しません。
+- **生の計算結果のみを出力**: デフォルトでは解釈・心理的読み・比喩的説明・創作を一切加えず、入力コンテキスト・`corpus_source`・使用エンコーダ（`HashEncoder`の場合は意味埋め込みではなく文字n-gramハッシュであること）・単一指標と生の計算値のみを報告します。
 
 この方式は意味・関連性・新規性を判定せず、文章や概念を生成・捏造しません。無関係な文や意味のない文も幾何条件を満たせばヒットします。空の結果も正しい結果で、既定値でヒットする保証はありません。有用性、創作品質、通常のRAGに対する優位性は実証されていません。
 
@@ -10,9 +14,9 @@ CrossRAGは、概念A・Bと出典記事Cを入力し、既存コーパスの残
 
 A・B・Cと全コーパス行を同じ`encoder.encode_passage`経路で埋め込みます。Cを通るアフィン平面からの残差をクラスタ化し、条件を満たすクラスタの平均残差方向に光線を作ります。検索するのは、その光線に対する前方距離と半径の条件を満たす既存行だけです。高次元の平面に一意の法線を仮定せず、方向はコーパスの分布から推定します。
 
-既定のエンコーダは、オフラインの文字 n-gram ハッシュ特徴です。意味埋め込みではありません。SentenceTransformerによる意味埋め込みも選べますが、その場合もnormal-ray検索は意味や関連性で候補を選別しません。検索後にホスト側LLMへ解釈・仮説・創作を依頼することは任意の別工程です。その解釈は数値検索の結果や事実の証拠とは区別します。
+既定のエンコーダは、オフラインの文字 n-gram ハッシュ特徴（`hash-ngram（文字特徴・意味理解ではない）`）です。意味埋め込みではありません。SentenceTransformerによる意味埋め込みも選べますが、その場合もnormal-ray検索は意味や関連性で候補を選別しません。ユーザーが明示的に解釈・創作を求めた場合のみ別工程として扱い、生の数値計算結果とは明確に区別します。
 
-旧来の4つの順位付け方式とPCA×外積の光線検索も残っています。CLIごとに入力・出力・既定値が異なります。詳細は以下と[SKILL.md](skill/crossrag/SKILL.md)を参照してください。
+単一指標の3つの順位付け方式（`similar` / `orthogonal` / `wedge`）とPCA×外積の光線検索も備えています。CLIごとに引数・出力・既定値が異なります。詳細は以下と[SKILL.md](skill/crossrag/SKILL.md)を参照してください。
 
 ## 数学的な見方
 
@@ -35,8 +39,8 @@ skill/crossrag/
   scripts/third_concept_cli.py  # normal-ray / third-concept CLI
   scripts/residual_ray.py       # アフィン残差クラスタと光線近傍検索
   scripts/third_concept.py      # 共通エンコーダ、第三概念順位付け、旧PCA光線
-  scripts/run.py                # 旧来の4方式のCLI
-  scripts/engine.py             # 旧来の順位付け本体、ハッシュエンコーダ
+  scripts/run.py                # 単一指標3方式（similar/orthogonal/wedge）のCLI
+  scripts/engine.py             # 単一指標順位付け本体、ハッシュエンコーダ
   scripts/compare_third_concept.py
   references/methodology.md
   references/modes.md
@@ -53,11 +57,11 @@ Set-Location skill/crossrag
 python scripts/third_concept_cli.py --A "概念A" --B "概念B" --C "出典記事" --corpus references/example-corpus.json --encoder hash --search-mode ray --ray-radius 0.25 --ray-start-distance 0.25 --ray-cluster-cosine 0.7 --ray-min-cluster-size 2 --limit 5
 ```
 
-`--A`・`--B`・`--C`にはテキストを直接渡します。`--C`はファイル名を読み込むオプションではありません。上の例は同梱の4行のJSONファイルを使います。`--corpus`を省略した場合は、`engine.py`にある22件の組み込みコーパスを使います。どちらも動作確認用の小さなコーパスです。
+`--A`・`--B`・`--C`にはテキストを直接渡します。`--C`はファイル名を読み込むオプションではありません。上の例は同梱の4行のJSONファイルを使います。
 
 出力の`status`、`clustering`、`rays`を確認してください。`--limit 5`は**返す光線の最大本数**で、ヒット件数ではありません。クラスタがあっても光線近傍に行がなければ`no_hits`になり、クラスタが成立しなければ`no_residual_clusters`になります。既定値で0件になることは異常ではありません。
 
-以下の検索コマンドも`skill/crossrag`をカレントにして実行します。`--corpus`の相対パスは**プロセスのカレントディレクトリ**から解決されます。この手順では`references/example-corpus.json`が正しく、`skill/crossrag/references/example-corpus.json`ではありません。別の場所から実行する場合やリポジトリ外のコーパスには、実際のカレントに合うパスか絶対パスを指定します。
+以下の検索コマンドも`skill/crossrag`をカレントにして実行します。`--corpus`や`--conversation`の相対パスは**プロセスのカレントディレクトリ**から解決されます。この手順では`references/example-corpus.json`が正しく、`skill/crossrag/references/example-corpus.json`ではありません。別の場所から実行する場合やリポジトリ外のコーパスには、実際のカレントに合うパスか絶対パスを指定します。
 
 ## 準備
 
@@ -158,30 +162,28 @@ A・B・Cのエンコード結果を`a`・`b`・`c`とします。エンコー�
 
 必要なら検索後にホストLLMへ、原文と出典IDを保持しつつ解釈・仮説・創作を依頼できます。生成内容は検索された原文と分け、未検証の解釈であると明記します。normal-ray CLI自体はLLMを呼ばず、新しい文や仮説を作りません。
 
-## その他のCLI: 旧来の順位付けとPCA光線
+## その他のCLI: 単一指標の順位付けとPCA光線
 
-### 4つの順位付け方式（run.py）
+### 3つの単一指標順位付け方式（run.py）
 
-既存のスキル実行入口`run.py`と[SKILL.md](skill/crossrag/SKILL.md)の基本フローは、引き続き4方式を扱い、CLIの既定は`wedge`です。以下は`skill/crossrag`から実行します。
+`run.py`と[SKILL.md](skill/crossrag/SKILL.md)の基本フローは、会話データ（`--conversation`）または明示コーパス（`--corpus`）を入力とし、3つの単一指標方式（`similar` / `orthogonal` / `wedge`、既定は`orthogonal`）で順位付けします。暗黙のデモコーパス使用は廃止されており、デモを実行する場合のみ`--demo-corpus`を明示します。以下は`skill/crossrag`から実行します。
 
 ```powershell
-python scripts/run.py --context "犬、カレー、夕暮れ" --method similar
-python scripts/run.py --context "犬、カレー、夕暮れ、帰宅" --mode creative --method wedge --limit 5
-python scripts/run.py --context "記憶、法線、検索" --mode discovery --method orthogonal --limit 5
-python scripts/run.py --context "犬、カレー" --mode creative --method similar --encoder hash
-python scripts/run.py --context "犬、カレー" --corpus references/example-corpus.json
+python scripts/run.py --context "犬、カレー、夕暮れ" --conversation path/to/conversation.json --mode orthogonal
+python scripts/run.py --context "犬、カレー、夕暮れ、帰宅" --corpus references/example-corpus.json --mode wedge --limit 5
+python scripts/run.py --context "記憶、法線、検索" --conversation path/to/conversation.txt --mode orthogonal --limit 5
+python scripts/run.py --context "犬、カレー" --mode similar --encoder hash --demo-corpus
 ```
 
-- **similar**: 文脈ベクトルの平均と候補文のコサイン類似度。
-- **orthogonal**: 文脈全体が張る空間への射影残差に、コサインの帯域と関連度の重みを混ぜたヒューリスティック。
-- **wedge**: 向き付き双ベクトル`a∧b`と`u∧v`のコサインなどを混ぜた順位。先頭2概念の順序交換で楔積成分の符号は反転しますが、最終順位全体の逆転は保証されません。高次元の一意の3次元法線や言語的な方向を表しません。
-- **random**: 再現可能なハッシュ順位。比較用。
+- **similar**（`ranking_metric: "cosine"`）: 文脈アンカーの平均ベクトルと候補文のコサイン類似度のみで順位付け。
+- **orthogonal**（`ranking_metric: "orthogonal_residual"`）: 文脈アンカー全体が張る部分空間への射影残差ノルムのみで順位付け。複合スコア・帯域・novelty・coherence重みは一切混ぜません。
+- **wedge**（`ranking_metric: "gram_bivector_cos"`）: 向き付き双ベクトル`a∧b`と`u∧v`のコサインのみで順位付け。先頭2概念の順序交換で符号が反転します。高次元の一意の3次元法線や言語的な方向を表しません。
 
-`--context`は2つ以上の概念を区切って指定します。`--mode`は`creative`（既定）/ `discovery`で、ホストへ渡す指示を切り替えます。`--method`は数値順位の方式です。`--limit`は選択行数で既定5、実装では1～20に制限されます。`--corpus`は空でない文字列3つのペア行形式だけを受け付け、normal-rayが扱う本文だけの行は使えません。コーパスには2件以上必要です。
+`--context`は2つ以上の概念を区切って指定します。`--mode`（別名`--method`）は`similar` / `orthogonal` / `wedge`から選びます。`--conversation`・`--corpus`・`--demo-corpus`のいずれか1つが必須で、すべて省略するとCLIエラー（終了コード2）になります。コーパスには2件以上の候補が必要です。
 
-出力は`context`・`mode`・`encoder`・`selected`・`total`・`warnings`・`note`と、ホスト向けの`task_mode`・`evidence_type`・`instruction`を持つJSONです。`selected`の各行には`index`・`a`・`b`・`line`・`score`・`cosine`・`orthogonal`・`wedge`が入ります。normal-rayの`rays[].hits[]`とは別の形式です。hashと短い語の組合せでは全候補のwedge成分が0になる場合があるため、`warnings`を確認し、その場合はwedgeが順位に寄与していないと明記します。
+出力は`context`・`mode`・`ranking_metric`・`corpus_source`（`"conversation"` / `"explicit"` / `"demo"`）・`encoder`・`selected`・`total`・`warnings`・`note`（「順位は指定された単一指標のみで決定。複合スコアは使用しない」）を持つJSONです。`selected`の各行には`index`・`a`・`b`・`line`・`rank_value`・`ranking_metric`・`cosine`・`orthogonal`・`wedge`が入ります（旧`score`キーは廃止）。hashと短い語の組合せでは全候補のwedge成分が0になる場合があるため、`warnings`を確認してください。
 
-同じエンコーダ、コーパス、生成条件で比較してください。式と限界は[methodology.md](skill/crossrag/references/methodology.md)、ホストLLMの創作・発見の出力の型は[modes.md](skill/crossrag/references/modes.md)にあります。方式名や数値順位だけで性能差を主張しません。
+同じエンコーダ、コーパスで比較してください。式と限界は[methodology.md](skill/crossrag/references/methodology.md)、出力ポリシーとモードの詳細は[modes.md](skill/crossrag/references/modes.md)にあります。
 
 ### 旧PCA×外積の光線（明示選択）
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare legacy CrossRAG retrieval with third-concept rankings."""
+"""Compare CrossRAG single-metric retrieval with third-concept rankings."""
 from __future__ import annotations
 
 import argparse
@@ -36,18 +36,17 @@ METHOD_NAMES = (
     "similar",
     "orthogonal",
     "wedge",
-    "random",
     "third-concept",
     "mean",
     "third-concept-no-wedge",
 )
 PLAIN_METHOD_NAMES = (
     "similar",
-    "random",
     "third-concept",
     "mean",
     "third-concept-no-wedge",
 )
+BASELINE_METHODS = ("similar", "orthogonal", "wedge")
 RATIO_METHOD = "third-concept-ratio"
 THIRD_CONCEPT_METHODS = ("third-concept", "mean", "third-concept-no-wedge")
 METRIC_NAMES = (
@@ -67,11 +66,11 @@ RATIO_METRIC_NAMES = (
     "between_AB_fraction",
 )
 NOTES = [
-    'similar / orthogonal / wedge / random は engine.run() を通り、その encode() は全テキストに "query: " を適用する。',
+    'similar / orthogonal / wedge は engine.run() を通り、その encode() は全テキストに "query: " を適用する。',
     "third-concept は score_third を目的関数として選ぶため、score_third の平均で高くなることは循環的であり、各平均は記述値にすぎず、優越性の証拠ではない。",
     "third-concept がベースラインと異ならない結果も、そのまま報告する。",
     "Baselines are not exclusion-filtered; baseline の contains_input は入力概念との文字列一致・包含を示す。",
-    "seed は評価シートのシャッフルにだけ使われ、engine.run() の random baseline は context とコーパス対の hash で決まる。",
+    "seed は評価シートのシャッフルと null 標本にだけ使われる。",
 ]
 EVALUATION_NOTES = [
     "wedge ablation compares each third-concept score with balance alone and with third-concept-no-wedge over all eligible rows.",
@@ -282,19 +281,17 @@ def _selected_entry(name, index, rows, common_metrics, A, B, terms, plain=False)
         "b": rows[index][1],
         "metrics": _public_metrics(common_metrics[index]),
     }
-    if name in METHOD_NAMES[:4]:
+    if name in BASELINE_METHODS:
         entry["contains_input"] = _row_contains(rows[index], A, B, terms)
     return entry
 
 
-def _plain_baselines(space, limit, seed):
+def _plain_baselines(space, limit):
     direction = normalise(space["a_vector"] + space["b_vector"])
     scores = [float(np.dot(normalise(vector), direction)) for vector in space["passage_vectors"]]
     similar = sorted(range(len(scores)), key=lambda index: (-scores[index], index))[:limit]
-    random_indices = np.random.default_rng(seed).permutation(len(scores))[:limit].tolist()
     return {
         "similar": [{"index": index} for index in similar],
-        "random": [{"index": int(index)} for index in random_indices],
     }
 
 
@@ -383,7 +380,7 @@ def _compare(
     excluded=None,
     space=None,
 ):
-    """Run legacy and third-concept methods in one shared representation."""
+    """Run single-metric and third-concept methods in one shared representation."""
     rows = _rows(corpus)
     if not rows:
         raise ValueError("corpus must not be empty")
@@ -429,10 +426,10 @@ def _compare(
 
     ranked = {}
     if plain:
-        ranked.update(_plain_baselines(space, requested_limit, int(seed)))
+        ranked.update(_plain_baselines(space, requested_limit))
     else:
         context = f"{used_a}、{used_b}"
-        for name in METHOD_NAMES[:4]:
+        for name in BASELINE_METHODS:
             ranked[name] = run(context, rows, name, limit=requested_limit, encoder=encoder)["selected"]
     for name in THIRD_CONCEPT_METHODS:
         ranked[name] = rank_entries(
@@ -548,7 +545,7 @@ def compare_methods(
     extra_query_texts=(),
     excluded=None,
 ):
-    """Run legacy and third-concept methods in one shared representation."""
+    """Run single-metric and third-concept methods in one shared representation."""
     result, _, _ = _compare(
         A, B, corpus, encoder, limit, seed, corpus_path,
         input_kind=input_kind, exclude=exclude, p_min=p_min,

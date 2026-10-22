@@ -75,19 +75,29 @@ class LegacyRegressionTest(unittest.TestCase):
     def test_engine_and_cli_match_snapshot(self):
         snapshot = json.loads((FIXTURES / "legacy_run_snapshot.json").read_text(encoding="utf-8"))
         corpora = {
-            "default": DEFAULT_CORPUS,
+            "default": None,
             "example": load_rows(ROOT / "references" / "example-corpus.json"),
         }
         for corpus_name, corpus in corpora.items():
-            for method in ("similar", "orthogonal", "wedge", "random"):
+            for method in ("similar", "orthogonal", "wedge"):
                 expected = snapshot[corpus_name][method]
-                self.assertEqual(run("犬、カレー、夕暮れ、帰宅", corpus, method, 0.55, 0.8, 5, HashEncoder()), expected)
-                command = [sys.executable, str(SCRIPTS / "run.py"), "--context", "犬、カレー、夕暮れ、帰宅", "--method", method, "--limit", "5"]
+                self.assertEqual(
+                    run(
+                        "犬、カレー、夕暮れ、帰宅",
+                        corpus=corpus,
+                        mode=method,
+                        limit=5,
+                        encoder=HashEncoder(),
+                        use_demo_corpus=(corpus_name == "default"),
+                    ),
+                    expected,
+                )
+                command = [sys.executable, str(SCRIPTS / "run.py"), "--context", "犬、カレー、夕暮れ、帰宅", "--mode", method, "--limit", "5"]
                 if corpus_name == "example":
                     command.extend(["--corpus", str(ROOT / "references" / "example-corpus.json")])
+                else:
+                    command.append("--demo-corpus")
                 actual = json.loads(subprocess.run(command, cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8"))
-                for key in ("task_mode", "evidence_type", "instruction"):
-                    actual.pop(key)
                 self.assertEqual(actual, expected)
 
 
