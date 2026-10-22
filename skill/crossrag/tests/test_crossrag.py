@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 SCRIPTS = Path(__file__).resolve().parent.parent / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
@@ -72,6 +74,34 @@ class SingleMetricEngineTest(unittest.TestCase):
                 # Verify descending order by rank_value (tie-broken by ascending index)
                 pairs = [(-row['rank_value'], row['index']) for row in selected]
                 self.assertEqual(pairs, sorted(pairs))
+
+    def test_ranking_sorts_by_unrounded_metric_before_rounding_output(self):
+        class SubRoundingEncoder:
+            name = 'sub-rounding'
+
+            def encode(self, texts):
+                # Context anchors average to [1, 0, 0].
+                # Candidate 0 and Candidate 1 both round to 0.50000 at 5 decimals,
+                # but Candidate 1 has a slightly higher unrounded cosine (0.500004 > 0.500001).
+                c0 = 0.500001
+                c1 = 0.500004
+                mapping = {
+                    'A': [1.0, 0.0, 0.0],
+                    'B': [1.0, 0.0, 0.0],
+                    'a0とb0。l0': [c0, np.sqrt(1.0 - c0 * c0), 0.0],
+                    'a1とb1。l1': [c1, np.sqrt(1.0 - c1 * c1), 0.0],
+                    'a0': [1.0, 0.0, 0.0],
+                    'b0': [0.0, 1.0, 0.0],
+                    'a1': [1.0, 0.0, 0.0],
+                    'b1': [0.0, 1.0, 0.0],
+                }
+                return np.asarray([mapping[t] for t in texts], dtype=np.float64)
+
+        corpus = [('a0', 'b0', 'l0'), ('a1', 'b1', 'l1')]
+        result = run('A、B', corpus, mode='similar', limit=2, encoder=SubRoundingEncoder())
+        self.assertEqual([row['index'] for row in result['selected']], [1, 0])
+        self.assertEqual(result['selected'][0]['rank_value'], 0.5)
+        self.assertEqual(result['selected'][1]['rank_value'], 0.5)
 
 
 class WedgeDegenerateTest(unittest.TestCase):
@@ -180,6 +210,18 @@ class RunCliContractTest(unittest.TestCase):
             self.assertEqual(data_txt['corpus_source'], 'conversation')
             self.assertEqual(data_txt['total'], 2)
             self.assertEqual(data_txt['ranking_metric'], 'cosine')
+
+    def test_conversation_malformed_json_is_rejected_not_parsed_as_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_pretty = Path(tmp) / 'broken.txt'
+            bad_pretty.write_text(
+                '{\n  "messages": [\n    {"role": "user", "content": "雨の窓辺、静かな時計"}\n    {"role": "assistant", "content": "カンマ抜けの壊れたJSON"}\n  ]\n}\n',
+                encoding='utf-8',
+            )
+            with self.assertRaises(ValueError):
+                load_conversation_corpus(bad_pretty)
+            completed = self.run_cli('--context', '犬、カレー', '--conversation', str(bad_pretty))
+            self.assertEqual(completed.returncode, 2)
 
     def test_rejects_removed_options_and_random_mode(self):
         for bad_args in (

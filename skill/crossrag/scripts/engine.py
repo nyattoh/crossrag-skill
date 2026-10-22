@@ -147,13 +147,15 @@ def run(context, corpus=None, mode='orthogonal', limit=5, encoder=None, use_demo
             'a': a,
             'b': b,
             'line': line,
-            'rank_value': round(float(rank_value), 5),
+            'rank_value': float(rank_value),
             'ranking_metric': ranking_metric,
             'cosine': round(sim, 5),
             'orthogonal': round(orth, 5),
             'wedge': round(wedge, 5),
         })
     rows.sort(key=lambda x: (-x['rank_value'], x['index']))
+    for row in rows:
+        row['rank_value'] = round(row['rank_value'], 5)
     selected = rows[:int(np.clip(limit, 1, 20))]
     warnings = []
     # ponytail: report the degenerate wedge term instead of fixing the encoder; checked on unrounded values over all candidates

@@ -60,6 +60,17 @@ def _row_from_conversation_item(item):
     return None
 
 
+def _looks_like_json_source(path, stripped):
+    suffix = Path(path).suffix.lower()
+    if suffix in {'.json', '.jsonl', '.ndjson'}:
+        return True
+    if stripped.startswith('{'):
+        return True
+    if stripped.startswith('[') and not re.match(r'^\[[^\]\r\n]+\]\s*[:：]', stripped):
+        return True
+    return False
+
+
 def load_conversation_corpus(path):
     if not path:
         raise ValueError('conversation path is required')
@@ -68,13 +79,17 @@ def load_conversation_corpus(path):
     if not stripped:
         raise ValueError('conversation file is empty')
     rows = []
-    parsed_json = None
-    if stripped.startswith(('[', '{')):
+    if _looks_like_json_source(path, stripped):
         try:
             parsed_json = json.loads(stripped)
-        except json.JSONDecodeError:
-            parsed_json = None
-    if parsed_json is not None:
+        except json.JSONDecodeError as exc:
+            non_empty_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+            try:
+                parsed_json = [json.loads(line) for line in non_empty_lines]
+            except json.JSONDecodeError:
+                raise ValueError(f'invalid conversation JSON: {exc}') from exc
+            if not all(isinstance(item, (dict, list)) for item in parsed_json):
+                raise ValueError(f'invalid conversation JSONL: {exc}') from exc
         if isinstance(parsed_json, dict):
             for key in ('messages', 'conversation', 'turns', 'utterances', 'items', 'corpus'):
                 if isinstance(parsed_json.get(key), list):
@@ -93,16 +108,15 @@ def load_conversation_corpus(path):
             line = raw_line.strip()
             if not line:
                 continue
-            if line.startswith('{') and line.endswith('}'):
+            if line.startswith('{') or (line.startswith('[') and not re.match(r'^\[[^\]\r\n]+\]\s*[:：]', line)):
                 try:
                     obj = json.loads(line)
-                except json.JSONDecodeError:
-                    obj = None
-                if obj is not None:
-                    row = _row_from_conversation_item(obj)
-                    if row is not None:
-                        rows.append(row)
-                    continue
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f'invalid JSON line in conversation file: {exc}') from exc
+                row = _row_from_conversation_item(obj)
+                if row is not None:
+                    rows.append(row)
+                continue
             line = re.sub(r'^(?:user|assistant|system|human|ai|speaker|\[\w+\]|[\w\-]+)\s*[:：]\s*', '', line, flags=re.IGNORECASE)
             if line.strip():
                 rows.append(_extract_pair_from_text(line))
