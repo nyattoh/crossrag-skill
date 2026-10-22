@@ -9,6 +9,7 @@ from engine import DEFAULT_CORPUS, HashEncoder, SentenceEncoder, run
 
 _UTTERANCE_KEYS = ('content', 'text', 'message', 'line', 'utterance')
 _TOKEN_SPLIT_RE = re.compile(r'[、,，。．.!！?？:：;；/／「」『』（）()\[\]\s]+')
+_JSON_DOC_START_RE = re.compile(r'^(?:\{\s*(?:"|\}|\r|\n)|\[\s*(?:\{|\[|"|\]|\r|\n))')
 
 
 def load_corpus(path):
@@ -64,11 +65,7 @@ def _looks_like_json_source(path, stripped):
     suffix = Path(path).suffix.lower()
     if suffix in {'.json', '.jsonl', '.ndjson'}:
         return True
-    if stripped.startswith('{'):
-        return True
-    if stripped.startswith('[') and not re.match(r'^\[[^\]\r\n]+\]\s*[:：]', stripped):
-        return True
-    return False
+    return bool(_JSON_DOC_START_RE.match(stripped))
 
 
 def load_conversation_corpus(path):
@@ -108,7 +105,7 @@ def load_conversation_corpus(path):
             line = raw_line.strip()
             if not line:
                 continue
-            if line.startswith('{') or (line.startswith('[') and not re.match(r'^\[[^\]\r\n]+\]\s*[:：]', line)):
+            if _JSON_DOC_START_RE.match(line):
                 try:
                     obj = json.loads(line)
                 except json.JSONDecodeError as exc:
@@ -117,7 +114,12 @@ def load_conversation_corpus(path):
                 if row is not None:
                     rows.append(row)
                 continue
-            line = re.sub(r'^(?:user|assistant|system|human|ai|speaker|\[\w+\]|[\w\-]+)\s*[:：]\s*', '', line, flags=re.IGNORECASE)
+            line = re.sub(
+                r'^(?:(?:\[[^\]\r\n]+\]|\{[^{}\r\n]+\})\s*[:：]?\s*)*(?:(?:user|assistant|system|human|ai|speaker|[\w\-]+)\s*[:：]\s*)?',
+                '',
+                line,
+                flags=re.IGNORECASE,
+            )
             if line.strip():
                 rows.append(_extract_pair_from_text(line))
     if len(rows) < 2:

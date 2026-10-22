@@ -199,7 +199,7 @@ class RunCliContractTest(unittest.TestCase):
 
             conv_txt = Path(tmp) / 'conv.txt'
             conv_txt.write_text(
-                'user: 猫の地図、街の裏側を歩く。\nassistant: 傘と月、夜道で空を見上げる。\n',
+                '[2026-10-22 10:00] user: 猫の地図、街の裏側を歩く。\n[1] assistant: 傘と月、夜道で空を見上げる。\n{note} 台所の記憶、湯気が立つ。\n',
                 encoding='utf-8',
             )
             completed_txt = self.run_cli(
@@ -208,7 +208,7 @@ class RunCliContractTest(unittest.TestCase):
             self.assertEqual(completed_txt.returncode, 0, completed_txt.stderr.decode('utf-8', errors='replace'))
             data_txt = json.loads(completed_txt.stdout.decode('utf-8'))
             self.assertEqual(data_txt['corpus_source'], 'conversation')
-            self.assertEqual(data_txt['total'], 2)
+            self.assertEqual(data_txt['total'], 3)
             self.assertEqual(data_txt['ranking_metric'], 'cosine')
 
     def test_conversation_malformed_json_is_rejected_not_parsed_as_text(self):
