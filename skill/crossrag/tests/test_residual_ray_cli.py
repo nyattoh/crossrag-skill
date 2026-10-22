@@ -52,6 +52,7 @@ class ResidualRayCliTest(unittest.TestCase):
         self.assertEqual(result["method"], "affine_residual_cluster")
         self.assertEqual(result["status"], "no_residual_clusters")
         self.assertEqual(result["corpus_size"], 10)
+        self.assertEqual(result["corpus_source"], "explicit")
         self.assertEqual(result["clustering"]["candidate_count"], result["corpus_size"])
         self.assertEqual(result["clustering"]["cluster_count"], 10)
         self.assertEqual(result["input"]["C"], "出典記事の本文")
@@ -66,6 +67,14 @@ class ResidualRayCliTest(unittest.TestCase):
 
     def test_default_residual_cluster_requires_c(self):
         self.assert_rejected(with_c=False, message="residual-cluster ray search requires --C")
+
+    def test_context_options_are_rejected_by_ray_mode(self):
+        for argument in (("--context", "source"), ("--context=source",)):
+            with self.subTest(argument=argument):
+                self.assert_rejected(
+                    *argument,
+                    message="--context, --ray-count, --serendipity and --law are only supported",
+                )
 
     def test_residual_cluster_rejects_legacy_only_flags_even_at_legacy_defaults(self):
         for arguments in (
@@ -173,7 +182,7 @@ class ResidualRayCliTest(unittest.TestCase):
                 calls.append(list(texts))
                 return np.asarray([vectors[text] for text in texts], dtype=float)
 
-        argv = ["third_concept_cli.py", "--A", "A", "--B", "B", "--C", "C", "--search-mode", "ray"]
+        argv = ["third_concept_cli.py", "--A", "A", "--B", "B", "--C", "C", "--search-mode", "ray", "--demo-corpus"]
         with io.TextIOWrapper(io.BytesIO(), encoding="utf-8") as output:
             with patch.object(sys, "argv", argv), patch.object(cli, "DEFAULT_CORPUS", rows), \
                     patch.object(cli, "make_encoder", return_value=FixedEncoder()), redirect_stdout(output):
@@ -183,6 +192,7 @@ class ResidualRayCliTest(unittest.TestCase):
 
         self.assertEqual(calls, [["A", "B", "C", "first", "second"]])
         self.assertEqual(result["params"]["encoding_path"], "encode_passage")
+        self.assertEqual(result["corpus_source"], "demo")
         self.assertEqual(result["status"], "hits_found")
         self.assertEqual([hit["line"] for hit in result["rays"][0]["hits"]], rows)
         self.assertEqual(result["warnings"], [])

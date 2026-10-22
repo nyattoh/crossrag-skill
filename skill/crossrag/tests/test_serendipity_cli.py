@@ -17,11 +17,14 @@ class SerendipityCliTest(unittest.TestCase):
     def run_cli(self, *arguments):
         command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"),
                    "--search-mode", "random-orthogonal", "--encoder", "hash", "--seed", "23"]
+        if "--corpus" not in arguments and "--demo-corpus" not in arguments:
+            command.append("--demo-corpus")
         return subprocess.run([*command, *arguments], cwd=ROOT, capture_output=True, check=False)
 
     def run_legacy(self, *arguments):
         command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"),
-                   "--A", "concept A", "--B", "concept B", "--encoder", "hash"]
+                   "--A", "concept A", "--B", "concept B", "--encoder", "hash",
+                   "--corpus", str(ROOT / "tests" / "fixtures" / "synthetic_corpus.json")]
         return subprocess.run([*command, *arguments], cwd=ROOT, capture_output=True, check=False)
 
     def test_repeated_contexts_select_isolated_mode_and_return_combined_json(self):
@@ -34,6 +37,7 @@ class SerendipityCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
         result = json.loads(completed.stdout.decode("utf-8"))
         self.assertEqual(result["mode"], "random-orthogonal")
+        self.assertEqual(result["corpus_source"], "explicit")
         self.assertEqual(result["input"]["contexts"], ["context one", "context two", "context three"])
         self.assertEqual(result["params"]["seed"], 23)
         self.assertTrue(result["rays"])
@@ -48,6 +52,17 @@ class SerendipityCliTest(unittest.TestCase):
                 self.assertEqual(completed.returncode, 2)
                 self.assertIn("at least two --context values", completed.stderr.decode("utf-8", errors="replace"))
                 self.assertEqual(completed.stdout, b"")
+
+    def test_random_orthogonal_requires_an_explicit_corpus(self):
+        completed = subprocess.run(
+            [
+                sys.executable, str(SCRIPTS / "third_concept_cli.py"),
+                "--search-mode", "random-orthogonal", "--context", "one", "--context", "two",
+            ],
+            cwd=ROOT, capture_output=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("one of --corpus or --demo-corpus is required", completed.stderr.decode("utf-8", errors="replace"))
 
     def test_awaiting_schema_has_exact_host_directive_and_contextual_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -95,6 +110,14 @@ class SerendipityCliTest(unittest.TestCase):
         self.assertFalse(result["awaiting_host_law"])
         self.assertEqual(result["law"], law)
         self.assertEqual(result["provenance"]["law_source"], "host_llm")
+
+    def test_law_value_starting_with_equals_is_not_treated_as_an_option(self):
+        completed = self.run_cli(
+            "--context", "one", "--context", "two", "--law", "=water flows uphill",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
+        result = json.loads(completed.stdout.decode("utf-8"))
+        self.assertEqual(result["law"], "=water flows uphill")
 
     def test_serendipity_flag_accepts_inclusive_integer_range_and_rejects_invalid_values(self):
         for value in ("0", "60", "100"):

@@ -51,6 +51,7 @@ class SkillPortabilityTest(unittest.TestCase):
             "agents/openai.yaml",
             "scripts/run.py",
             "scripts/engine.py",
+            "scripts/llm_pool.py",
             "scripts/third_concept.py",
             "scripts/third_concept_cli.py",
             "scripts/serendipity_ray.py",

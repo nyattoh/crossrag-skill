@@ -12,9 +12,18 @@ Each returned row exposes `rank_value` (equal to the mode's single metric), `ran
 
 ## Corpus source and encoder transparency
 
-- **No implicit demo corpus**: `engine.run()` raises `ValueError` when `corpus=None` unless `use_demo_corpus=True` is explicitly passed. `run.py` requires `--conversation <path>`, `--corpus <path>`, or explicit `--demo-corpus`. The bundled 22-item `DEFAULT_CORPUS` and `references/example-corpus.json` are strictly for explicit demonstration/smoke tests and must never be used implicitly.
+- **No implicit demo corpus**: `engine.run()` raises `ValueError` when `corpus=None` unless `use_demo_corpus=True` is explicitly passed. `run.py` requires `--conversation <path>`, `--corpus <path>`, or explicit `--demo-corpus`. The bundled 22-item `DEFAULT_CORPUS` is used only with explicit `--demo-corpus`. `references/example-corpus.json` is a separate example file and is labelled `explicit` when passed with `--corpus`.
+- **No CLI fallback**: `third_concept_cli.py` and `compare_third_concept.py` require `--corpus` or explicit `--demo-corpus` for retrieval. All three CLIs accept `--llm-pool <path>` as a separate mode; it cannot be combined with geometric corpus sources.
 - **Conversation-derived candidates**: Normal operation takes conversation data (`--conversation` or user conversation utterances) and records `corpus_source` (`"conversation"`, `"explicit"`, or `"demo"`).
 - **Encoder disclosure**: Output always records `encoder`. `HashEncoder` (`hash-ngram（文字特徴・意味理解ではない）`) is a reproducible character n-gram hash representation, **not** a semantic embedding model. For semantic embeddings, use `--encoder semantic` with a local `SentenceTransformer` model (e.g. `intfloat/multilingual-e5-small`).
+
+## Host-generated LLM knowledge pool
+
+The host regenerates the pool for each new request and varies the fields and concepts. Saved pools are reused only for explicit replay. The LLM pool is generated in a separate host request that receives no parent conversation or context terms. The CLI reads a UTF-8 JSON array of non-empty strings that can be encoded as valid UTF-8, strips surrounding whitespace, removes duplicates by NFKC-normalised case-folded text with collapsed whitespace, and requires at least 10 unique concepts. A pool that falls below the minimum or a requested limit larger than the pool is an error.
+
+The draw uses `numpy.random.default_rng(seed).permutation(pool_size)[:limit]`. An omitted seed comes from 53 bits of `secrets.randbits` and is returned in the result. This generated seed is exactly representable by JSON consumers that use IEEE-754 numbers. A caller-supplied seed is echoed unchanged and can exceed that range. The result uses `mode: "llm-pool"`, `corpus_source: "llm_knowledge"`, `knowledge_basis: "host_llm_general_knowledge"`, `ranking_metric: "seeded_uniform_draw"`, `encoder: "none"`, one-based draw order in `rank_value`, and `total` unique concepts. Each selected `index` is zero-based in the deduplicated list. The draw does not use context, load a hash or semantic encoder, or calculate similarity. Do not derive the seed from context. Reproducing the order requires the same pool, seed, and NumPy version. `--llm-pool-model` is caller-supplied metadata; the CLI cannot verify the generating model or whether RAG was used.
+
+Isolation depends on the host's request handling. If a host cannot start a request without inherited conversation, the pool cannot be claimed to be context-free; document that boundary and do not silently reuse conversation data.
 
 A wedge or residual computation is pure vector geometry; it does not decode text, discover hidden concepts, or prove factual claims. By default, report only the raw mathematical calculation results without adding unrequested interpretation.
 

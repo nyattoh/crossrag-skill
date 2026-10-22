@@ -1,6 +1,6 @@
 ---
 name: crossrag
-description: Explore conversation or concept-corpus utterances using single-metric geometric retrieval (similarity, orthogonal-residual, oriented wedge), normal-ray geometry, or random-orthogonal serendipity. Reports raw mathematical calculation results without unrequested interpretation; bundled demo corpus is never used implicitly.
+description: Explore conversation or explicitly supplied concept corpora with single-metric geometry (similarity, orthogonal-residual, or oriented wedge), normal-ray, or random-orthogonal search. Draw uniformly from a separately generated host-LLM knowledge pool in a context-free mode. Bundled demo data is never used implicitly.
 license: MIT
 compatibility: Requires Python 3.10+ and NumPy for local retrieval. Semantic mode additionally needs sentence-transformers and a locally available model.
 ---
@@ -9,9 +9,10 @@ compatibility: Requires Python 3.10+ and NumPy for local retrieval. Semantic mod
 
 ## Purpose and limits
 
-CrossRAG performs deterministic mathematical retrieval over conversation utterances or an explicitly supplied corpus from single geometric viewpoints (`similar`, `orthogonal`, `wedge`), `normal-ray`, or `random-orthogonal`.
+CrossRAG supports two separate inputs. Geometric modes retrieve from conversation utterances or an explicitly supplied corpus. The `llm-pool` mode draws concepts uniformly from a separately generated host-LLM knowledge pool.
 
-- **Source data is conversation data (or an explicit user corpus) only**: The bundled 22-item demo corpus (`DEFAULT_CORPUS` / `references/example-corpus.json`) is strictly for explicit `--demo-corpus` smoke testing and must **never** be used implicitly.
+- **Materials are explicit**: Retrieval requires `--conversation`, `--corpus`, `--demo-corpus`, or `--llm-pool`. The built-in 22-item `DEFAULT_CORPUS` is used only with explicit `--demo-corpus` and is labelled `corpus_source: "demo"`. `references/example-corpus.json` is a separate example file; when supplied with `--corpus`, it is labelled `corpus_source: "explicit"`.
+- **LLM knowledge is a separate mode**: `--llm-pool` accepts a JSON array of strings and does not use context, a geometric mode, or an encoder. Its `generation_model` is optional metadata. Do not claim RAG retrieval unless the host confirms that retrieval was used.
 - **Single-metric mathematical ranking**: In `engine.py` / `run.py`, each mode ranks strictly by one metric (`similar` = `cosine`, `orthogonal` = `orthogonal_residual`, `wedge` = `gram_bivector_cos`). No composite score, cosine-band target, novelty weight, or coherence weight is used.
 - **Encoder disclosure**: Always display the `encoder` field from the output. The default `hash` encoder (`hash-ngram（文字特徴・意味理解ではない）`) is a character n-gram hash representation and **is not a semantic embedding**.
 - Never say a search ran if the script did not run.
@@ -20,13 +21,8 @@ CrossRAG performs deterministic mathematical retrieval over conversation utteran
 
 When the user asks to run CrossRAG (e.g. "CrossRAGして"):
 
-1. **Default output is raw mathematical results only**: Output the structured JSON or a plain table containing:
-   - `context` (input context concepts)
-   - `corpus_source` (`conversation`, `explicit`, or `demo`)
-   - `encoder` (explicitly noting `hash-ngram（文字特徴・意味理解ではない）` is not a semantic embedding when `hash` is used)
-   - `mode` and `ranking_metric` (`cosine`, `orthogonal_residual`, or `gram_bivector_cos`)
-   - `selected` rows (`index`, `a`, `b`, `line`, `rank_value`, `ranking_metric`, `cosine`, `orthogonal`, `wedge`)
-   - `warnings` and `note`
+1. **Default output is raw results only**. For geometric retrieval, return the structured JSON or a plain table with `context`, `corpus_source`, `encoder`, `mode`, `ranking_metric`, `selected`, `warnings`, and `note`. Each selected row contains `index`, `a`, `b`, `line`, `rank_value`, `ranking_metric`, `cosine`, `orthogonal`, and `wedge`.
+   For `--llm-pool`, return `mode`, `corpus_source`, `knowledge_basis`, `encoder`, `ranking_metric`, `seed`, `generation_model`, `selected`, and `total`. Each selected concept includes `index`, `concept`, `rank_value`, and `ranking_metric`. `index` is zero-based in the deduplicated list. Do not add a context field because the pool draw does not use context.
 2. **No unrequested interpretation**: Unless the user explicitly asks for interpretation, prose generation, metaphorical explanation, or hypothesis writing, **do NOT add any interpretation, psychological reading, metaphorical commentary, or creative prose**.
 
 ## First run
@@ -43,9 +39,9 @@ For an explicit smoke test using the demo corpus, you must pass `--demo-corpus`:
 python scripts/run.py --context '犬、カレー、夕暮れ' --mode similar --demo-corpus
 ```
 
-Omitting `--conversation`, `--corpus`, and `--demo-corpus` raises a CLI error (`exit code 2`).
+Omitting `--conversation`, `--corpus`, `--demo-corpus`, and `--llm-pool` raises a CLI error (`exit code 2`). The third-concept and comparison CLIs also require an explicit corpus, demo flag, or LLM pool for retrieval.
 
-## Execution
+## Geometric execution
 
 1. Extract **at least two context concepts** from the user's request or conversation, retaining their exact order for `wedge` mode. Do not fabricate user facts.
 2. Prepare the candidate pool from **conversation data** (`--conversation <path>`) or an **explicit user corpus** (`--corpus <path>`). Only use `--demo-corpus` if the user explicitly asks for a demo/smoke test.
@@ -55,7 +51,7 @@ Omitting `--conversation`, `--corpus`, and `--demo-corpus` raises a CLI error (`
    - `orthogonal` → `orthogonal_residual`
    - `wedge` → `gram_bivector_cos`
    Inspect the returned `warnings`. With the default hash encoder, short Japanese terms can make the wedge component zero for every candidate; report that warning plainly.
-5. **Follow the Reporting policy**: Return only the raw JSON / metric table (`context`, `corpus_source`, `encoder`, `ranking_metric`, `selected` rows with `rank_value` and raw metrics, `warnings`). Only perform downstream writing or hypothesis framing if the user explicitly requests it.
+5. **Follow the Reporting policy**: For geometric modes, return only the raw JSON or metric table with context, source, encoder, ranking metric, selected rows, and warnings. For `--llm-pool`, return the separate draw schema described above. Only perform downstream writing or hypothesis framing if the user explicitly requests it.
 
 ## Host compatibility
 
@@ -73,6 +69,20 @@ python scripts/run.py --context '犬、カレー' --corpus references/example-co
 ```
 
 The script prints structured UTF-8 JSON with `context`, `mode`, `ranking_metric`, `corpus_source` (`conversation`, `explicit`, or `demo`), `encoder`, `selected` (each item containing `index`, `a`, `b`, `line`, `rank_value`, `ranking_metric`, `cosine`, `orthogonal`, `wedge`), `total`, `warnings`, and `note`.
+
+## LLM knowledge pool
+
+Use this mode when the user asks for concepts from the host model's general knowledge rather than conversation retrieval. Regenerate the pool for every new request and vary the fields as well as the concepts. Reuse a saved pool only when explicitly reproducing a previous draw.
+
+1. Start a fresh host request that does not inherit the parent conversation, transcript, or conversation-derived context. If the host cannot guarantee that isolation, state the limitation and do not describe the pool as context-free.
+2. Use this fixed prompt without adding context terms: `From your general learned knowledge, list 40 distinct concepts across varied fields. Choose a fresh mix of fields and concepts for this request. Return only a JSON array of non-empty strings. Do not use conversation history or user-provided context. Do not claim external retrieval unless you can confirm it was used.` Save only the returned JSON array as a UTF-8 file. This workflow requests model knowledge; it does not prove which training or retrieval sources produced an item.
+3. Run `python scripts/run.py --llm-pool path/to/pool.json --limit 5`. Add `--seed 17` to reproduce a draw. Add `--llm-pool-model model-id` only when the generation model is known. The optional `--context` argument has no effect on this mode.
+4. The file must be a UTF-8 JSON array of non-empty strings. CrossRAG strips surrounding whitespace, removes duplicates after Unicode NFKC, case-folding, and whitespace normalisation, then requires at least 10 unique concepts. If fewer remain, CrossRAG exits with code 2. `--limit` must not exceed the unique pool size.
+5. Without `--seed`, CrossRAG creates a fresh 53-bit seed for each run and returns it. With a seed, it selects the first `k` indices from `numpy.random.default_rng(seed).permutation(pool_size)`, where `k` is `--limit`. Reproducing the order requires the same pool and NumPy version. Never derive the seed from context.
+6. The result uses `corpus_source: "llm_knowledge"`, `knowledge_basis: "host_llm_general_knowledge"`, `ranking_metric: "seeded_uniform_draw"`, `encoder: "none"`, and `rank_value` values from 1 through `k`. These labels are distinct from geometric ranking metrics. Do not describe the draw as relevance, similarity, novelty, or quality ranking.
+7. Only after selection, combine the selected concepts with context if the user asks. Keep that later host request separate from pool generation and the draw.
+
+The same `--llm-pool` and `--llm-pool-model` options are available in `third_concept_cli.py` and `compare_third_concept.py`. They return the same context-free draw schema and reject geometric or comparison options. `--emit-prompt` without `--with-math` returns a prompt without reading a corpus. `--emit-prompt --with-math` reads an explicitly selected corpus and includes geometric candidates. It labels demo-derived prompts with `corpus_source: demo`.
 
 Read `references/methodology.md` for formulae, limitations, and evaluation guidance. Read `references/modes.md` for mode details.
 
