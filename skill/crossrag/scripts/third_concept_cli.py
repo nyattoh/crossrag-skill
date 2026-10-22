@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 
 from engine import DEFAULT_CORPUS
+from llm_pool import draw_llm_pool, load_llm_pool
 from residual_ray import explore_residual_ray
-from run import load_corpus
+from run import explicitly_supplied, load_corpus
 from third_concept import build_hypothesis_prompt, explore, explore_ray, is_plain_row, load_hypotheses, make_encoder
 
 
@@ -51,10 +52,6 @@ def percentage(value):
     return parsed
 
 
-def explicitly_supplied(argv, *options):
-    return any(argument.split("=", 1)[0] in options for argument in argv)
-
-
 def build_host_prompt(contexts, selected_clusters, tone, tone_instruction, guardrails):
     directive = "この世界が成立する奇妙な法則を一つ作れ"
     prompt = (
@@ -91,6 +88,9 @@ def main():
     parser.add_argument("--B")
     parser.add_argument("--C", help="source article text for residual-cluster ray search")
     parser.add_argument("--corpus")
+    parser.add_argument("--demo-corpus", action="store_true", help="Explicitly use the bundled demo corpus")
+    parser.add_argument("--llm-pool", help="JSON array of concepts generated from host LLM knowledge without conversation context")
+    parser.add_argument("--llm-pool-model", help="Optional metadata naming the host LLM that generated the pool")
     parser.add_argument("--encoder", choices=("hash", "semantic"), default="hash")
     parser.add_argument("--model", default="intfloat/multilingual-e5-small")
     parser.add_argument("--prefix-policy", choices=("auto", "e5", "prefix-free"), default="auto")
@@ -120,6 +120,26 @@ def main():
     argv = sys.argv[1:]
     args = parser.parse_args()
     try:
+        if args.llm_pool is not None:
+            if args.corpus is not None or args.demo_corpus:
+                parser.error("--llm-pool cannot be combined with --corpus or --demo-corpus")
+            if args.A is not None or args.B is not None:
+                parser.error("--llm-pool is a context-free draw and cannot be combined with --A or --B")
+            unsupported = (
+                "--C", "--encoder", "--model", "--prefix-policy", "--exclude", "--method", "--p-min",
+                "--null-samples", "--vocab", "--hypotheses", "--no-center", "--search-mode",
+                "--ray-method", "--ray-radius", "--ray-start-distance", "--ray-cluster-cosine",
+                "--ray-min-cluster-size", "--ray-cluster-gap", "--ray-min-set-size", "--emit-prompt",
+                "--with-math", "--ray-count", "--serendipity", "--law",
+            )
+            if explicitly_supplied(argv, *unsupported):
+                parser.error("--llm-pool cannot be combined with geometric, hypothesis, encoder, or --law options")
+            pool_seed = args.seed if explicitly_supplied(argv, "--seed") else None
+            result = draw_llm_pool(load_llm_pool(args.llm_pool), args.limit, pool_seed, args.llm_pool_model)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        if args.llm_pool_model is not None:
+            parser.error("--llm-pool-model requires --llm-pool")
         has_new_options = explicitly_supplied(argv, "--context", "--ray-count", "--serendipity", "--law")
         if args.search_mode == "random-orthogonal":
             if args.A is not None or args.B is not None or args.C is not None:
@@ -169,7 +189,11 @@ def main():
                 if supplied:
                     parser.error(f"{args.ray_method} ray search does not support {flag}")
         if args.search_mode == "random-orthogonal":
-            corpus = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
+            if args.corpus is not None and args.demo_corpus:
+                parser.error("specify only one of --corpus or --demo-corpus")
+            if args.corpus is None and not args.demo_corpus:
+                parser.error("one of --corpus or --demo-corpus is required; implicit demo corpus is disabled")
+            corpus = read_corpus(args.corpus) if args.corpus is not None else DEFAULT_CORPUS
             from serendipity_ray import explore_random_orthogonal_ray
 
             encoder = make_encoder(args.encoder, args.model, prefix_policy=args.prefix_policy)
@@ -179,6 +203,7 @@ def main():
                 cosine_threshold=args.ray_cluster_cosine,
             )
             result.setdefault("params", {})["serendipity"] = args.serendipity
+            result["corpus_source"] = "explicit" if args.corpus is not None else "demo"
             result["input"] = {"contexts": args.context}
             selected_clusters = result.get("combined_clusters", [])
             tone = result["params"].get("tone_band", "playful")
@@ -211,7 +236,11 @@ def main():
         if args.emit_prompt and not args.with_math:
             print(build_hypothesis_prompt(args.A, args.B))
             return
-        corpus = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
+        if args.corpus is not None and args.demo_corpus:
+            parser.error("specify only one of --corpus or --demo-corpus")
+        if args.corpus is None and not args.demo_corpus:
+            parser.error("one of --corpus or --demo-corpus is required; implicit demo corpus is disabled")
+        corpus = read_corpus(args.corpus) if args.corpus is not None else DEFAULT_CORPUS
         encoder = make_encoder(args.encoder, args.model, prefix_policy=args.prefix_policy)
         vocab = None
         if args.vocab:
@@ -237,6 +266,7 @@ def main():
                     min_set_size=2 if args.ray_min_set_size is None else args.ray_min_set_size,
                     max_sets=args.limit,
                 )
+            result["corpus_source"] = "explicit" if args.corpus is not None else "demo"
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
         hypotheses = load_hypotheses(args.hypotheses, args.A, args.B) if args.hypotheses else None
@@ -246,12 +276,17 @@ def main():
                 args.exclude, args.method, args.p_min, args.null_samples,
             )
             math_candidates = [item for item in result["candidates"] if item["origin"] == "math"]
-            print(build_hypothesis_prompt(args.A, args.B, math_candidates))
+            prompt = build_hypothesis_prompt(args.A, args.B, math_candidates)
+            if args.demo_corpus:
+                print(f"corpus_source: demo\n\n{prompt}")
+            else:
+                print(prompt)
             return
         result = explore(
             args.A, args.B, corpus, encoder, args.limit, args.seed, vocab, hypotheses, not args.no_center, args.corpus,
             args.exclude, args.method, args.p_min, args.null_samples,
         )
+        result["corpus_source"] = "explicit" if args.corpus is not None else "demo"
     except (ValueError, RuntimeError, ImportError, OSError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, ensure_ascii=False, indent=2))

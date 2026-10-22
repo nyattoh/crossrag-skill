@@ -13,6 +13,8 @@ from pathlib import Path
 import numpy as np
 
 from engine import DEFAULT_CORPUS, normalise, run
+from llm_pool import draw_llm_pool, load_llm_pool
+from run import explicitly_supplied
 from third_concept import (
     _contains_input,
     _normalised_exclude_terms,
@@ -654,6 +656,8 @@ def _calibration_markdown_lines(calibration):
 def render_markdown(result):
     if result.get("mode") == "word-vs-sentence":
         rendered = "\n\n".join(("# Word comparison\n\n" + render_markdown(result["word"]), "# Sentence comparison\n\n" + render_markdown(result["sentence"])))
+        if result.get("corpus_source"):
+            rendered = f"Corpus source: `{result['corpus_source']}`\n\n" + rendered
         return rendered + "\n".join(_calibration_markdown_lines(result.get("calibration")))
     method_names = tuple(result["methods"])
     lines = [
@@ -670,6 +674,8 @@ def render_markdown(result):
         "| Method | s_A | s_B | Plane projection | Residual | Emergence norm | Score third |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
+    if result.get("corpus_source"):
+        lines.insert(4, f"- Corpus source: `{result['corpus_source']}`")
     for name in method_names:
         means = result["methods"][name]["means"]
         values = " | ".join(f"{means[metric]:.6f}" for metric in METRIC_NAMES)
@@ -712,10 +718,15 @@ def write_blind_materials(result, corpus, sheet_dir):
     key_path = output_dir / "blind_key.json"
     sheet_lines = [
         "# Blind human evaluation sheet", "", f"- Input A: `{result['input']['A']}`",
-        f"- Input B: `{result['input']['B']}`", "", "人手評価は未実施です。各観点を 1–5 で記入してください。", "",
+        f"- Input B: `{result['input']['B']}`",
+    ]
+    if result.get("corpus_source"):
+        sheet_lines.append(f"- Corpus source: `{result['corpus_source']}`")
+    sheet_lines.extend([
+        "", "人手評価は未実施です。各観点を 1–5 で記入してください。", "",
         "| ID | A | B | Entry text | Unexpectedness (1–5) | Coherence (1–5) | Emergence (1–5) | Testability (1–5) | Comment |",
         "|---|---|---|---|---|---|---|---|---|",
-    ]
+    ])
     key_entries = {}
     width = max(2, len(str(len(indices))))
     for number, index in enumerate(indices, 1):
@@ -725,7 +736,10 @@ def write_blind_materials(result, corpus, sheet_dir):
         sheet_lines.append(f"| {blind_id} | {safe_values[0]} | {safe_values[1]} | {safe_values[2]} |  |  |  |  |  |")
         key_entries[blind_id] = {"corpus_index": index, "methods": methods_by_index[index]}
     sheet_path.write_text("\n".join(sheet_lines) + "\n", encoding="utf-8")
-    key_path.write_text(json.dumps({"seed": result["params"]["seed"], "corpus_id": result["corpus_id"], "entries": key_entries}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    key = {"seed": result["params"]["seed"], "corpus_id": result["corpus_id"], "entries": key_entries}
+    if "corpus_source" in result:
+        key["corpus_source"] = result["corpus_source"]
+    key_path.write_text(json.dumps(key, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"sheet": str(sheet_path), "key": str(key_path)}
 
 
@@ -751,11 +765,14 @@ def positive_null_samples(value):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Compare CrossRAG retrieval methods")
-    parser.add_argument("--A", required=True)
-    parser.add_argument("--B", required=True)
+    parser.add_argument("--A")
+    parser.add_argument("--B")
     parser.add_argument("--A-sentence")
     parser.add_argument("--B-sentence")
     parser.add_argument("--corpus")
+    parser.add_argument("--demo-corpus", action="store_true", help="Explicitly use the bundled demo corpus")
+    parser.add_argument("--llm-pool", help="JSON array of concepts generated from host LLM knowledge without comparison context")
+    parser.add_argument("--llm-pool-model", help="Optional metadata naming the host LLM that generated the pool")
     parser.add_argument("--encoder", choices=("hash", "semantic"), default="hash")
     parser.add_argument("--model", default="intfloat/multilingual-e5-small")
     parser.add_argument("--prefix-policy", choices=("auto", "e5", "prefix-free"), default="auto")
@@ -771,7 +788,58 @@ def main():
     parser.add_argument("--aggregate-only", action="store_true")
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
     parser.add_argument("--sheet-dir")
+    argv = sys.argv[1:]
     args = parser.parse_args()
+    if args.llm_pool is not None:
+        if args.corpus is not None or args.demo_corpus:
+            parser.error("--llm-pool cannot be combined with --corpus or --demo-corpus")
+        unsupported = (
+            "--A-sentence", "--B-sentence", "--encoder", "--model", "--prefix-policy", "--input-kind",
+            "--exclude", "--p-min", "--null-samples", "--control-pair", "--control-words",
+            "--control-samples", "--aggregate-only", "--sheet-dir",
+        )
+        if explicitly_supplied(argv, *unsupported) or args.A is not None or args.B is not None:
+            parser.error("--llm-pool is a separate context-free draw and cannot be combined with comparison inputs or options")
+        pool_seed = args.seed if explicitly_supplied(argv, "--seed") else None
+        try:
+            result = draw_llm_pool(load_llm_pool(args.llm_pool), args.limit, pool_seed, args.llm_pool_model)
+        except (ValueError, RuntimeError, ImportError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.format == "json":
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            lines = [
+                "# LLM knowledge pool draw",
+                "",
+                f"- mode: `{result['mode']}`",
+                f"- corpus_source: `{result['corpus_source']}`",
+                f"- knowledge_basis: `{result['knowledge_basis']}`",
+                f"- ranking_metric: `{result['ranking_metric']}`",
+                f"- encoder: `{result['encoder']}`",
+                f"- seed: `{result['seed']}`",
+                f"- generation_model: `{result['generation_model'] if result['generation_model'] is not None else 'null'}`",
+                f"- total: {result['total']}",
+                "",
+                "## Selected concepts",
+                "",
+                "| rank_value | index | concept | ranking_metric |",
+                "| ---: | ---: | --- | --- |",
+            ]
+            for row in result["selected"]:
+                concept = " ".join(row["concept"].splitlines()).replace("|", "\\|")
+                lines.append(
+                    f"| {row['rank_value']} | {row['index']} | {concept} | {row['ranking_metric']} |"
+                )
+            print("\n".join(lines))
+        return
+    if args.llm_pool_model is not None:
+        parser.error("--llm-pool-model requires --llm-pool")
+    if args.A is None or args.B is None:
+        parser.error("the following arguments are required: --A and --B")
+    if args.corpus is not None and args.demo_corpus:
+        parser.error("specify only one of --corpus or --demo-corpus")
+    if args.corpus is None and not args.demo_corpus:
+        parser.error("one of --corpus or --demo-corpus is required; implicit demo corpus is disabled")
     if (args.A_sentence is None) != (args.B_sentence is None):
         parser.error("--A-sentence and --B-sentence must be supplied together")
     if args.A_sentence is not None and args.sheet_dir:
@@ -781,18 +849,20 @@ def main():
     if args.aggregate_only and args.sheet_dir:
         parser.error("--aggregate-only cannot be used with --sheet-dir")
     try:
-        rows = read_corpus(args.corpus) if args.corpus else DEFAULT_CORPUS
+        rows = read_corpus(args.corpus) if args.corpus is not None else DEFAULT_CORPUS
         encoder = make_encoder(args.encoder, args.model, prefix_policy=args.prefix_policy)
         if args.A_sentence is not None:
             result = compare_pair(
                 (args.A, args.B), (args.A_sentence, args.B_sentence), rows, encoder, args.limit,
                 args.seed, args.corpus, args.exclude, args.p_min, args.null_samples,
             )
+            result["corpus_source"] = "explicit" if args.corpus is not None else "demo"
         else:
             result = compare_methods(
                 args.A, args.B, rows, encoder, limit=args.limit, seed=args.seed, corpus_path=args.corpus,
                 input_kind=args.input_kind, exclude=args.exclude, p_min=args.p_min, null_samples=args.null_samples,
             )
+            result["corpus_source"] = "explicit" if args.corpus is not None else "demo"
             if args.sheet_dir:
                 write_blind_materials(result, rows, args.sheet_dir)
         if args.control_pair or args.control_words:

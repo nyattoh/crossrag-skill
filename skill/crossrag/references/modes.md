@@ -13,6 +13,20 @@
 
 No composite `score`, cosine-band target, novelty weight, or coherence weight is used. The legacy `random` mode is removed.
 
+## LLM knowledge pool draw
+
+`--llm-pool <path>` is separate from geometric retrieval. It reads a JSON array of non-empty strings, removes normalised duplicates, requires at least 10 unique concepts, and samples exactly `--limit` concepts uniformly without replacement. `--limit` cannot exceed the pool size.
+
+Generate a new pool for every new request, varying its fields and concepts. Reuse a saved pool only to reproduce a previous draw. Generate the pool in a fresh host request without parent conversation or context terms. The CLI does not generate concepts or call an LLM. A host that cannot guarantee this isolation must report that limitation. Do not claim RAG was used unless the host confirms retrieval.
+
+The output reports `mode: "llm-pool"`, `corpus_source: "llm_knowledge"`, `knowledge_basis: "host_llm_general_knowledge"`, `ranking_metric: "seeded_uniform_draw"`, `encoder: "none"`, the effective seed, optional `generation_model` metadata, `selected` concepts with one-based `rank_value`, and `total` unique concepts. Each selected `index` is zero-based in the deduplicated list. A missing seed uses a fresh 53-bit random seed, which is exactly representable in JSON consumers that use IEEE-754 numbers. A supplied seed reproduces the same draw from the same pool and NumPy version. Do not derive the seed from context. The context does not affect the draw, and no hash or semantic encoder is loaded.
+
+Do not compare this draw's `rank_value` with geometric metrics. It records sample order only. After the draw, combine concepts with context in a separate host request only if the user asks. Existing geometric `--law` processing remains a separate workflow.
+
+## Corpus source requirements
+
+`run.py` retrieval requires exactly one of `--conversation`, `--corpus`, `--demo-corpus`, or `--llm-pool`. `third_concept_cli.py` and `compare_third_concept.py` retrieval require exactly one of `--corpus`, `--demo-corpus`, or `--llm-pool`. The demo corpus is an explicit opt-in and returns `corpus_source: "demo"`. Prompt-only `third_concept_cli.py --emit-prompt` does not retrieve a corpus.
+
 ## Optional downstream tasks (only when explicitly requested)
 When the user explicitly asks for creative writing or hypothesis generation on top of the retrieved results:
 - Keep raw retrieval numbers and corpus provenance separate from host-generated prose or hypotheses.

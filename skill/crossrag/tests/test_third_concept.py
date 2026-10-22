@@ -392,7 +392,7 @@ class LeakageAndCliTest(unittest.TestCase):
         self.assertIn(b"corpus item", completed.stderr)
 
     def test_cli_rejects_non_positive_limit(self):
-        command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "湯気", "--B", "睡眠", "--limit", "0"]
+        command = [sys.executable, str(SCRIPTS / "third_concept_cli.py"), "--A", "湯気", "--B", "睡眠", "--demo-corpus", "--limit", "0"]
         completed = subprocess.run(command, cwd=ROOT, capture_output=True)
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn(b"limit must be at least 1", completed.stderr)

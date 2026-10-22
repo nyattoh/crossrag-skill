@@ -1,8 +1,8 @@
 # CrossRAG
 
-CrossRAGは、会話データや明示コーパスを単一の数学的指標（`similar` / `orthogonal` / `wedge`）または法線光線（`normal-ray` / `random-orthogonal`）で探索し、生の数値計算結果をUTF-8のJSONで返すスキルです。
+CrossRAGは、会話データ、明示コーパス、または別工程で生成したLLM知識poolを扱い、幾何検索と一様抽選を区別して結果をUTF-8のJSONで返すスキルです。
 
-- **元データは会話データ（または明示コーパス）のみ**: 同梱の22件コーパス（`DEFAULT_CORPUS`）や`references/example-corpus.json`は、`--demo-corpus`等による明示的な動作確認専用であり、通常経路で暗黙に使用されることはありません。
+- **入力素材は明示必須**: 幾何検索は会話データまたは明示コーパスを使います。`--demo-corpus`は明示opt-inで、出力に`corpus_source: "demo"`を記録します。LLM知識poolは会話から分離して生成したJSONを`--llm-pool`で読み込みます。
 - **単一指標のみによる順位付け**: `engine.py` / `run.py`では各モードが単一指標（`similar=cosine`、`orthogonal=orthogonal_residual`、`wedge=gram_bivector_cos`）のみで順位を決定します。複合スコア（`score`）や`band`・`novelty`・`coherence`の重み付けは使用しません。
 - **生の計算結果のみを出力**: デフォルトでは解釈・心理的読み・比喩的説明・創作を一切加えず、入力コンテキスト・`corpus_source`・使用エンコーダ（`HashEncoder`の場合は意味埋め込みではなく文字n-gramハッシュであること）・単一指標と生の計算値のみを報告します。
 
@@ -41,6 +41,7 @@ skill/crossrag/
   scripts/third_concept.py      # 共通エンコーダ、第三概念順位付け、旧PCA光線
   scripts/run.py                # 単一指標3方式（similar/orthogonal/wedge）のCLI
   scripts/engine.py             # 単一指標順位付け本体、ハッシュエンコーダ
+  scripts/llm_pool.py           # LLM知識poolの検証と一様抽選
   scripts/compare_third_concept.py
   references/methodology.md
   references/modes.md
@@ -92,7 +93,8 @@ macOS/Linuxで`python`がPython 3.10以上を指さない場合は、`python3`�
 | オプション | residual-clusterでの意味・既定値 |
 | --- | --- |
 | `--A` / `--B` / `--C` | 必須の空でないテキスト。Cは光線の原点となる出典記事 |
-| `--corpus` | UTF-8のJSON配列へのパス。省略時は組み込み22件 |
+| `--corpus` | UTF-8のJSON配列へのパス。`--demo-corpus`を使わない場合は必須。|
+| `--demo-corpus` | 同梱demoを明示的に選択。出力の`corpus_source`は`demo`。|
 | `--encoder` | `hash`（既定）または`semantic` |
 | `--model` | semantic用のモデルID。既定は`intfloat/multilingual-e5-small` |
 | `--prefix-policy` | `auto`（既定）/ `e5` / `prefix-free`。hashには影響しない |
@@ -162,11 +164,31 @@ A・B・Cのエンコード結果を`a`・`b`・`c`とします。エンコー�
 
 必要なら検索後にホストLLMへ、原文と出典IDを保持しつつ解釈・仮説・創作を依頼できます。生成内容は検索された原文と分け、未検証の解釈であると明記します。normal-ray CLI自体はLLMを呼ばず、新しい文や仮説を作りません。
 
+## LLM知識poolの抽選
+
+会話や現在の文脈を使わずに概念を抽選する場合は、先にホストLLMの知識からpoolを別ステップで作ります。新しい依頼では毎回poolを生成し直し、概念だけでなく分野も変えます。保存済みpoolの再利用は、以前の抽選を明示的に再現する場合に限ります。新しい隔離済みリクエストを使い、親会話や文脈語を渡さないでください。ホストが分離を保証できない場合は、その境界を明記し、文脈非公開とは主張しないでください。次の固定promptに文脈語を追加しません。
+
+```text
+From your general learned knowledge, list 40 distinct concepts across varied fields. Choose a fresh mix of fields and concepts for this request. Return only a JSON array of non-empty strings. Do not use conversation history or user-provided context. Do not claim external retrieval unless you can confirm it was used.
+```
+
+結果をUTF-8のJSON配列として保存し、`skill/crossrag`からいずれかのCLIを実行します。
+
+```powershell
+python scripts/run.py --llm-pool path/to/pool.json --limit 5 --seed 17
+python scripts/third_concept_cli.py --llm-pool path/to/pool.json --limit 5 --seed 17
+python scripts/compare_third_concept.py --llm-pool path/to/pool.json --limit 5 --seed 17
+```
+
+`--llm-pool-model`は生成モデル名が分かる場合だけ指定します。`--context`は必須ではなく、指定してもpool抽選に使いません。CLIはJSON配列の非空文字列を検証し、外側の空白を除き、Unicode NFKC・case-fold・空白正規化後の重複を除きます。重複除去後10件未満なら終了コード2で失敗します。`--limit`が一意な件数を超える場合も失敗します。
+
+seedを省略すると毎回新しい53-bit seedを生成し、結果に記録します。これはJSONをIEEE-754数値で扱うクライアントでも正確に再入力できます。seedを指定すると、同じpoolとNumPyバージョンで同じ順序を再現します。seedは文脈から作らないでください。結果は`mode: "llm-pool"`、`corpus_source: "llm_knowledge"`、`knowledge_basis: "host_llm_general_knowledge"`、`ranking_metric: "seeded_uniform_draw"`、`encoder: "none"`、`generation_model`、`selected`、`total`を記録します。`selected[].index`は重複除去後の配列に対する0始まりの位置です。`rank_value`は抽選順を示し、類似度や有用性の順位ではありません。文脈との組合せは抽選後に利用者が望む場合だけ別工程で行います。
+
 ## その他のCLI: 単一指標の順位付けとPCA光線
 
 ### 3つの単一指標順位付け方式（run.py）
 
-`run.py`と[SKILL.md](skill/crossrag/SKILL.md)の基本フローは、会話データ（`--conversation`）または明示コーパス（`--corpus`）を入力とし、3つの単一指標方式（`similar` / `orthogonal` / `wedge`、既定は`orthogonal`）で順位付けします。暗黙のデモコーパス使用は廃止されており、デモを実行する場合のみ`--demo-corpus`を明示します。以下は`skill/crossrag`から実行します。
+`run.py`と[SKILL.md](skill/crossrag/SKILL.md)は、会話データ（`--conversation`）、明示コーパス（`--corpus`）、明示demo（`--demo-corpus`）のいずれかを必須とします。LLM知識poolは`--llm-pool`で別モードとして抽選します。demoは`corpus_source: "demo"`と記録されます。以下は`skill/crossrag`から実行します。
 
 ```powershell
 python scripts/run.py --context "犬、カレー、夕暮れ" --conversation path/to/conversation.json --mode orthogonal
@@ -179,7 +201,7 @@ python scripts/run.py --context "犬、カレー" --mode similar --encoder hash 
 - **orthogonal**（`ranking_metric: "orthogonal_residual"`）: 文脈アンカー全体が張る部分空間への射影残差ノルムのみで順位付け。複合スコア・帯域・novelty・coherence重みは一切混ぜません。
 - **wedge**（`ranking_metric: "gram_bivector_cos"`）: 向き付き双ベクトル`a∧b`と`u∧v`のコサインのみで順位付け。先頭2概念の順序交換で符号が反転します。高次元の一意の3次元法線や言語的な方向を表しません。
 
-`--context`は2つ以上の概念を区切って指定します。`--mode`（別名`--method`）は`similar` / `orthogonal` / `wedge`から選びます。`--conversation`・`--corpus`・`--demo-corpus`のいずれか1つが必須で、すべて省略するとCLIエラー（終了コード2）になります。コーパスには2件以上の候補が必要です。
+幾何モードでは`--context`に2つ以上の概念を指定し、`--mode`（別名`--method`）から`similar` / `orthogonal` / `wedge`を選びます。`--conversation`・`--corpus`・`--demo-corpus`のいずれか1つが必須です。`--llm-pool`は幾何モードと併用しません。`run.py`と`third_concept_cli.py`はpool modeでも任意の`--context`を受け付けますが、抽選には使いません。`compare_third_concept.py`には`--context`がなく、A/B入力もpool modeでは受け付けません。コーパスには2件以上の候補が必要です。
 
 出力は`context`・`mode`・`ranking_metric`・`corpus_source`（`"conversation"` / `"explicit"` / `"demo"`）・`encoder`・`selected`・`total`・`warnings`・`note`（「順位は指定された単一指標のみで決定。複合スコアは使用しない」）を持つJSONです。`selected`の各行には`index`・`a`・`b`・`line`・`rank_value`・`ranking_metric`・`cosine`・`orthogonal`・`wedge`が入ります（旧`score`キーは廃止）。hashと短い語の組合せでは全候補のwedge成分が0になる場合があるため、`warnings`を確認してください。
 

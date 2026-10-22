@@ -6,6 +6,7 @@ import re
 import sys
 from pathlib import Path
 from engine import DEFAULT_CORPUS, HashEncoder, SentenceEncoder, run
+from llm_pool import draw_llm_pool, load_llm_pool
 
 _UTTERANCE_KEYS = ('content', 'text', 'message', 'line', 'utterance')
 _TOKEN_SPLIT_RE = re.compile(r'[、,，。．.!！?？:：;；/／「」『』（）()\[\]\s]+')
@@ -26,6 +27,15 @@ def load_corpus(path):
             raise ValueError('each corpus item must contain non-empty a, b, line strings')
         rows.append(tuple(row))
     return rows
+
+
+def explicitly_supplied(argv, *options):
+    names = [
+        argument.split('=', 1)[0]
+        for argument in argv
+        if argument.startswith('--') and argument != '--'
+    ]
+    return any(len(name) > 2 and option.startswith(name) for name in names for option in options)
 
 
 def _extract_pair_from_text(text):
@@ -131,7 +141,7 @@ def main():
     # Windows consoles default to a legacy code page; the JSON contract is UTF-8.
     sys.stdout.reconfigure(encoding='utf-8')
     p = argparse.ArgumentParser(description='CrossRAG single-metric geometric retrieval')
-    p.add_argument('--context', required=True, help='Two or more concepts separated by commas')
+    p.add_argument('--context', help='Two or more concepts separated by commas')
     p.add_argument('--mode', choices=['similar', 'orthogonal', 'wedge'], default=None, help='Single ranking metric mode')
     p.add_argument('--method', choices=['similar', 'orthogonal', 'wedge'], default=None, help='Alias for --mode')
     p.add_argument('--encoder', choices=['hash', 'semantic'], default='hash')
@@ -139,21 +149,40 @@ def main():
     p.add_argument('--corpus', help='JSON list of [a,b,line] or {a,b,line}')
     p.add_argument('--conversation', help='Conversation log (JSON, JSONL, or plain text) to extract candidate utterances from')
     p.add_argument('--demo-corpus', action='store_true', help='Explicitly use the bundled 22-item demo corpus')
+    p.add_argument('--llm-pool', help='JSON array of concepts generated from host LLM knowledge without conversation context')
+    p.add_argument('--llm-pool-model', help='Optional metadata naming the host LLM that generated the pool')
     p.add_argument('--limit', type=int, default=5)
-    args = p.parse_args()
+    p.add_argument('--seed', type=int, help='Seed for a reproducible uniform LLM pool draw')
+    argv = sys.argv[1:]
+    args = p.parse_args(argv)
     if args.mode and args.method and args.mode != args.method:
         p.error('--mode and --method must match when both are supplied')
-    selected_mode = args.mode or args.method or 'orthogonal'
-    sources = [bool(args.corpus), bool(args.conversation), bool(args.demo_corpus)]
+    sources = [args.corpus is not None, args.conversation is not None, args.demo_corpus, args.llm_pool is not None]
     if sum(sources) == 0:
-        p.error('one of --conversation, --corpus, or --demo-corpus is required (implicit demo corpus is disabled)')
+        p.error('one of --conversation, --corpus, --demo-corpus, or --llm-pool is required (implicit demo corpus is disabled)')
     if sum(sources) > 1:
-        p.error('specify only one of --conversation, --corpus, or --demo-corpus')
+        p.error('specify only one of --conversation, --corpus, --demo-corpus, or --llm-pool')
+    if args.llm_pool is not None:
+        if args.mode or args.method or explicitly_supplied(argv, '--encoder', '--model'):
+            p.error('--llm-pool is a separate draw mode and cannot be combined with geometric or encoder options')
+        try:
+            data = draw_llm_pool(load_llm_pool(args.llm_pool), args.limit, args.seed, args.llm_pool_model)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            p.error(str(exc))
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    if args.llm_pool_model is not None:
+        p.error('--llm-pool-model requires --llm-pool')
+    if args.seed is not None:
+        p.error('--seed requires --llm-pool')
+    if not args.context:
+        p.error('--context is required for geometric retrieval')
+    selected_mode = args.mode or args.method or 'orthogonal'
     try:
         encoder = HashEncoder() if args.encoder == 'hash' else SentenceEncoder(args.model)
         if args.demo_corpus:
             data = run(args.context, None, selected_mode, args.limit, encoder, use_demo_corpus=True, corpus_source='demo')
-        elif args.conversation:
+        elif args.conversation is not None:
             corpus = load_conversation_corpus(args.conversation)
             data = run(args.context, corpus, selected_mode, args.limit, encoder, use_demo_corpus=False, corpus_source='conversation')
         else:
